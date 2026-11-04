@@ -1,75 +1,77 @@
-# quantum-circuits
+# Quantum circuits
 
-A personal research and teaching support library. **WIP**
+A personal compiler front end built from small, immutable Python values.
+Write circuit constructors as ordinary Python functions; inspect and transform
+their returned data separately.
 
-Main functionality: the `Frag` abstraction (below).
-Reference constructions are built on top of it — presently a Cuccaro ripple-carry adder and the QFT (see the demo in `frag.py`),
-with QROM, QSP phase-angle computation, LCU, and QSVT planned.
+The foundation provides canonical, exact single-qubit Clifford+T operators
+and local circuit composition. Python 3.10 or later; no runtime or test
+dependencies beyond the standard library.
 
-This library is intentionally minimal.
-No comprehensive catalogue of arithmetic circuits, no support for backends such as
-[Qiskit](https://www.ibm.com/quantum/qiskit) or [Cirq](https://quantumai.google/cirq),
-though translation is easy by design. This library does not even use [NumPy](https://numpy.org/);
-aside from the standard library, the sole (optional) import is [mpmath](https://mpmath.org/).
+## Start here
 
-> [!IMPORTANT]
-> Expects Python 3.14. Optional dependence on `mpmath`.
+From this directory, without installation:
 
----
+```sh
+python3 -m examples.basic
+python3 -m unittest discover -v
+```
 
-## The Frag abstraction
+```python
+from quantum_circuits import Qubit, H, I, S, T, op, gate, seq
 
-A quantum circuit is a stream of `Op`s (an "opstream"), each targeting at most two `Qubit` objects.
-A `Qubit` wraps a `name` string that serves as its identity.
+q = Qubit('q')
+assert op('HS') == S @ H
+assert op('HTH') == H @ T @ H
+assert op('TT') == S
+assert T.inverse() @ T == I
+assert seq(gate(T, q), gate(T, q)) == gate(S, q)
 
-There are three kinds of `Op`: `Gate`, `Ising`, and `Measure`.
+u = op('HTSHT')
+assert op(''.join(u.iter_gates())) == u
+```
 
-- A **`Gate`** is a single-qubit Pauli rotation. The three types — `X`, `Y`, `Z` — each carry an angle θ and a target `q`;
-  semantically the gate is $\exp(i\theta P)$ for $P = X, Y, Z$.
-- An **`Ising`** is a two-qubit Pauli-pair rotation. The three types — `XX`, `YY`, `ZZ` — each carry an angle θ and two qubits `q0`, `q1`;
-  semantically the gate is $\exp(i\theta\, P \otimes P)$.
-- A **`Measure`** targets exactly one `Qubit`.
+`op` and `seq` use **execution order**. `@` is matrix multiplication, so its
+right operand acts first. All phases are retained. Equivalent single-qubit
+operators have identical canonical fields and compare equal; frozen dataclasses
+supply hashing automatically.
 
-There is no controlled gate, and no controlled rotation, among the primitives.
-Entanglement enters only through the `Ising` rotations; every controlled operation — `CNOT`, `CZ`, controlled phase, Toffoli —
-is the programmer's to build as a combinator from an `Ising` entangler and local rotations, exact up to a global phase.
-Multi-controlled and open (|0⟩) controls are likewise combinators. The demo builds the standard ladder.
+## Project layout
 
-A `Frag` is the central data structure: a frozen, hashable value that wraps a *generative procedure*.
-The procedure (`fn`, of type `Script`) is a no-argument generator function — a thunk — that yields operations and child `Frag`s, and may `return` a value.
-You construct a fragment by wrapping its procedure, `Frag(body)`; there is no subclassing and no registration.
-A registration process, against a `Library`, is planned but deferred in pursuit of a minimal core;
-it is the intended home for the canonical, content-addressed identity of a circuit.
-Parameters (qubits, angles, register sizes) live in the procedure's closure, so a parameterised fragment is produced by a factory that returns a `Frag`.
+| Location | Purpose |
+| --- | --- |
+| `quantum_circuits/operators.py` | `SingleQubitOperator`, normalisation, constructors, and lowering |
+| `quantum_circuits/clifford.py` | Supporting exact Clifford algebra |
+| `quantum_circuits/model.py` | Qubits, gates, and normalising `seq` |
+| `examples/basic.py` | Runnable examples, including higher-order constructors |
+| `tests/` | Exact and numerical matrix checks, plus interface tests |
+| `tools/generate_clifford_tables.py` | Reproducible exact tables and H/S words |
+| [docs/core.md](docs/core.md) | Complete interface and representation reference |
+| [DESIGN.md](DESIGN.md) | Implementation boundaries and further work |
 
-`emit` is a free function, not a method.
-`emit(frag)` is a lazy, depth-first walk that yields the annotated opstream, recursing into any child `Frag` the procedure yields —
-so a fragment calls another simply by yielding it.
-A child's `return` value propagates back as the value of the `yield` that produced it, giving fragments honest subroutine semantics.
-`emit` is not itself the interpreter: a *driver* consumes the stream and decides what it means — tracing its structure, flattening it to bare ops, or (later) simulating it.
-The demo includes two such drivers.
+Check the generated tables with:
 
-The stream is of two kinds.
+```sh
+python3 tools/generate_clifford_tables.py --check
+```
 
-**Operations** — `Gate`, `Ising`, `Measure` — the raw circuit primitives.
+An editable installation is optional, for importing from another project:
 
-**Messages** carry structure and control out of band.
+```sh
+python3 -m pip install -e .
+```
 
-- `Enter` and `Exit` bracket each fragment a driver enters, letting a consumer track structure.
-  They also expose the backward channel: the driver sends values back *into* `emit`, which arrive as the value of the corresponding `yield`.
-- `Skip` answers an `Enter`: it tells `emit` to skip that fragment's body.
-  A skipped fragment is a leaf — it yields its `Enter` and no `Exit`.
-- `Halt` is yielded *by* a fragment and is an interrupt: it unwinds every open fragment back to the driver, emitting no further `Exit`s, and the driver receives it.
-  It is both a `Message` and an `Exception` — the exception is what performs the unwind.
-- A `Measure` is answered the same way an `Enter` is: the fragment that yielded it receives the driver's outcome as the value of its `yield`.
-  There is presently no dedicated result wrapper; the outcome is sent in directly.
+## Migration from the Clifford-only core
 
-Numerical values come in many kinds, some of which are merely potential numeric values.
-These include gate angles and polynomials of various kinds (regular/Taylor, Chebyshev, Laurent).
-Each is carried by `Expr`, which presently is a single type wrapping a string and defining equality by that string;
-subtypes for the various polynomial kinds are planned, for maximum flexibility in circuit construction —
-a parametric circuit family like QAOA benefits from revisable gate angles.
-Keeping values symbolic supports optional `mpmath` representations, frequently required for advanced functionality such as QSP phase-angle computation.
+`SingleQubitOperator` is now the central value type. Top-level `I`, `X`, `Y`,
+`Z`, `H`, `S`, and `T` are all operator values. Replace `Clif(c, q)` with
+`gate(op(c), q)`, and `TGate(q)` with `gate(T, q)`. Use `op` for ordinary word
+construction. The `clifford` helper remains available for the supporting
+`SingleQubitClifford` type; promote its result explicitly with `op`.
 
-> [!CAUTION]
-> This design is not stable. All of the above is subject to breaking change. That includes core structural decisions.
+Circuit nodes are `Gate`, `CZGate`, `CCZGate`, and `Seq`. `seq` combines adjacent
+same-wire single-qubit operators. Whole-circuit equality remains structural
+after those local reductions.
+
+Contracts, named fragments, repetition, measurement and classical control,
+arbitrary-rotation approximation, and backend export remain future work.
