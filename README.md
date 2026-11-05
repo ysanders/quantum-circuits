@@ -1,10 +1,8 @@
 # Quantum circuits
 
-I use this package to prototype design choices while developing quantum
-algorithms. I can write two implementations of a subroutine in Python, compose
-each with the surrounding circuit, and inspect the operations that survive in
-each design. The current gate set consists of exact single-qubit Clifford+T
-operators, CZ, and CCZ.
+This codebase is written entirely by me and entirely for me.
+
+Use it if you like it.
 
 [The model](#the-model) · [Prototyping a phase oracle](#prototyping-a-phase-oracle) ·
 [Circuit graphs](#circuit-graphs) ·
