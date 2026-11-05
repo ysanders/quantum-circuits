@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 import unittest
 
-from quantum_circuits.clifford import H, I, S, X, Y, Z, SingleQubitClifford, clifford
+from quantum_circuits.clifford import H, I, S, X, Y, Z, Clif, clifford
 from quantum_circuits._clifford_tables import FRAME_LABELS
 from tests.reference import FRAMES, PAULI_X, PAULI_Z, dagger, matrix, mm
 
@@ -19,33 +19,33 @@ class CliffordTests(unittest.TestCase):
         ))
         for frame, label in enumerate(FRAME_LABELS):
             # Labels are matrix order, whereas the parser is execution order.
-            self.assertEqual(clifford(label[::-1]), SingleQubitClifford(frame))
+            self.assertEqual(clifford(label[::-1]), Clif(frame))
         self.assertEqual((I.frame, X.frame, Y.frame, Z.frame, H.frame, S.frame), (0, 1, 2, 3, 4, 8))
 
     def test_read_only_properties_and_repr(self):
-        c = SingleQubitClifford(23, 11)
+        c = Clif(23, 11)
         self.assertEqual((c.rep, c.pauli, c.phase), (5, 3, 3))
-        self.assertEqual(repr(c), 'SingleQubitClifford(phase=3, rep=5, pauli=3)')
+        self.assertEqual(repr(c), 'Clif(phase=3, rep=5, pauli=3)')
         with self.assertRaises(FrozenInstanceError):
             c.frame = 0
         self.assertFalse(hasattr(c, '__dict__'))
 
     def test_canonical_phase_and_hash(self):
         for phase in range(-24, 25):
-            a = SingleQubitClifford(7, phase)
-            b = SingleQubitClifford(7, phase % 8)
+            a = Clif(7, phase)
+            b = Clif(7, phase % 8)
             self.assertEqual(a, b)
             self.assertEqual(hash(a), hash(b))
         self.assertEqual(hash(clifford('HXH')), hash(Z))
-        self.assertEqual(len({SingleQubitClifford(f, k) for f in range(24) for k in range(8)}), 192)
+        self.assertEqual(len({Clif(f, k) for f in range(24) for k in range(8)}), 192)
 
     def test_validation(self):
         for frame in (-1, 24, 100):
             with self.assertRaises(ValueError):
-                SingleQubitClifford(frame)
+                Clif(frame)
         for frame, phase in ((True, 0), (0, False), (1.0, 0), (0, 0.5), ('1', 0)):
             with self.assertRaises(TypeError):
-                SingleQubitClifford(frame, phase)
+                Clif(frame, phase)
 
     def test_word_execution_order(self):
         self.assertEqual(clifford(), I)
@@ -54,8 +54,8 @@ class CliffordTests(unittest.TestCase):
         self.assertEqual(clifford('H', S), S @ H)
         self.assertEqual(clifford('HS').frame, 16)
         self.assertEqual(clifford('SH').frame, 12)
-        self.assertEqual(clifford('XZ'), SingleQubitClifford(2, 2))
-        self.assertEqual(clifford('ZX'), SingleQubitClifford(2, 6))
+        self.assertEqual(clifford('XZ'), Clif(2, 2))
+        self.assertEqual(clifford('ZX'), Clif(2, 6))
         for word in ('T', 'h', 'H!'):
             with self.assertRaises(ValueError):
                 clifford(word)
@@ -63,20 +63,20 @@ class CliffordTests(unittest.TestCase):
             with self.assertRaises(TypeError):
                 clifford(value)
         with self.assertRaises(TypeError):
-            SingleQubitClifford.from_word(None)
+            Clif.from_word(None)
 
     def test_named_relations_and_phases(self):
         self.assertEqual(H @ H, I)
         self.assertEqual(S @ S, Z)
         self.assertEqual(H @ X @ H, Z)
-        self.assertEqual(S.inverse(), SingleQubitClifford(11))
-        self.assertEqual(H @ S @ H @ S @ H @ S, SingleQubitClifford(0, 1))
-        self.assertFalse(SingleQubitClifford(0, 1).is_identity)
-        self.assertTrue(SingleQubitClifford(0, 8).is_identity)
-        self.assertEqual(X @ Z, SingleQubitClifford(2, 6))
+        self.assertEqual(S.inverse(), Clif(11))
+        self.assertEqual(H @ S @ H @ S @ H @ S, Clif(0, 1))
+        self.assertFalse(Clif(0, 1).is_identity)
+        self.assertTrue(Clif(0, 8).is_identity)
+        self.assertEqual(X @ Z, Clif(2, 6))
 
     def test_all_36864_products_against_independent_matrices(self):
-        values = [SingleQubitClifford(f, k) for f in range(24) for k in range(8)]
+        values = [Clif(f, k) for f in range(24) for k in range(8)]
         matrices = {c: matrix(c) for c in values}
         for a in values:
             for b in values:
@@ -88,7 +88,7 @@ class CliffordTests(unittest.TestCase):
     def test_all_inverses_against_matrices(self):
         for frame in range(24):
             for phase in range(8):
-                c = SingleQubitClifford(frame, phase)
+                c = Clif(frame, phase)
                 inverse = c.inverse()
                 self.assertEqual(c @ inverse, I)
                 self.assertEqual(inverse @ c, I)
@@ -96,7 +96,7 @@ class CliffordTests(unittest.TestCase):
                 self.assertLess(max(abs(a - b) for a, b in zip(matrix(inverse), dagger(matrix(c)))), 1e-12)
 
     def test_associativity_on_all_frame_triples(self):
-        frames = [SingleQubitClifford(f) for f in range(24)]
+        frames = [Clif(f) for f in range(24)]
         for a in frames:
             for b in frames:
                 for c in frames:

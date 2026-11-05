@@ -12,11 +12,11 @@ from dataclasses import dataclass
 
 from ._clifford_tables import FRAME_INVERSE, FRAME_PRODUCT
 
-__all__ = ['SingleQubitClifford', 'clifford', 'I', 'X', 'Y', 'Z', 'H', 'S']
+__all__ = ['Clif', 'clifford', 'I', 'X', 'Y', 'Z', 'H', 'S']
 
 
 @dataclass(frozen=True, slots=True)
-class SingleQubitClifford:
+class Clif:
     frame: int
     phase: int = 0
 
@@ -42,22 +42,22 @@ class SingleQubitClifford:
 
     def __repr__(self) -> str:
         return (
-            f'SingleQubitClifford(phase={self.phase}, '
+            f'Clif(phase={self.phase}, '
             f'rep={self.rep}, pauli={self.pauli})'
         )
 
-    def __matmul__(self, other: SingleQubitClifford) -> SingleQubitClifford:
-        if not isinstance(other, SingleQubitClifford):
+    def __matmul__(self, other: Clif) -> Clif:
+        if not isinstance(other, Clif):
             return NotImplemented
         frame, correction = FRAME_PRODUCT[self.frame][other.frame]
         return _VALUES[8 * frame + (self.phase + other.phase + correction) % 8]
 
-    def inverse(self) -> SingleQubitClifford:
+    def inverse(self) -> Clif:
         frame, correction = FRAME_INVERSE[self.frame]
         return _VALUES[8 * frame + (correction - self.phase) % 8]
 
     @classmethod
-    def from_word(cls, word: str) -> SingleQubitClifford:
+    def from_word(cls, word: str) -> Clif:
         """Reduce I/X/Y/Z/H/S in execution order; whitespace is ignored.
 
         The empty word denotes I. Inverses can be expressed with inverse(),
@@ -79,12 +79,12 @@ class SingleQubitClifford:
 
 # Products, inverses, and word constructors share this small pool of values.
 # Direct dataclass construction remains available and uses the same equality.
-_VALUES = tuple(SingleQubitClifford(frame, phase) for frame in range(24) for phase in range(8))
+_VALUES = tuple(Clif(frame, phase) for frame in range(24) for phase in range(8))
 I, X, Y, Z, H, S = (_VALUES[8 * frame] for frame in (0, 1, 2, 3, 4, 8))
 _NAMED = dict(zip('IXYZHS', (I, X, Y, Z, H, S)))
 
 
-def clifford(*operations: str | SingleQubitClifford) -> SingleQubitClifford:
+def clifford(*operations: str | Clif) -> Clif:
     """Compose words and Clifford values in execution order.
 
     clifford('H', 'S') == clifford('HS') == S @ H.
@@ -92,8 +92,8 @@ def clifford(*operations: str | SingleQubitClifford) -> SingleQubitClifford:
     result = I
     for op in operations:
         if isinstance(op, str):
-            op = SingleQubitClifford.from_word(op)
-        if not isinstance(op, SingleQubitClifford):
-            raise TypeError('clifford() accepts words and SingleQubitClifford values')
+            op = Clif.from_word(op)
+        if not isinstance(op, Clif):
+            raise TypeError('clifford() accepts words and Clif values')
         result = op @ result
     return result

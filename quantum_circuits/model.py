@@ -1,177 +1,314 @@
-"""Immutable primitive operations and local sequence normalisation."""
+"""Immutable port graphs and constructors for named quantum wires."""
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import TypeAlias
+from typing import Literal, TypeAlias
 
-from .operators import SingleQubitOperator, _Accumulator, op
+from .operators import I, WireOp, op
 
 
 @dataclass(frozen=True, slots=True)
-class Qubit:
+class Wire:
     """A named wire: equal names identify the same wire."""
 
     name: str
 
     def __post_init__(self) -> None:
         if not isinstance(self.name, str):
-            raise TypeError('a qubit name must be a string')
+            raise TypeError('a wire name must be a string')
 
     def __repr__(self) -> str:
-        return f'Qubit({self.name!r})'
+        return f'Wire({self.name!r})'
 
 
-def _require_qubits(*qubits: Qubit) -> None:
-    if not all(isinstance(q, Qubit) for q in qubits):
-        raise TypeError('gate operands must be Qubit values')
-    if len(set(qubits)) != len(qubits):
-        raise ValueError('a gate must have distinct qubit operands')
+def _require_wires(*wires: Wire) -> None:
+    if not all(isinstance(q, Wire) for q in wires):
+        raise TypeError('wires must be Wire values')
+    if len(set(wires)) != len(wires):
+        raise ValueError('wire names must be distinct')
 
 
 @dataclass(frozen=True, slots=True)
-class Gate:
+class Apply:
     """Apply a canonical single-qubit operator to a named wire."""
 
-    op: SingleQubitOperator
-    targ: Qubit
+    op: WireOp
+    targ: Wire
 
     def __post_init__(self) -> None:
-        if not isinstance(self.op, SingleQubitOperator):
-            raise TypeError('op must be a SingleQubitOperator; use gate() for words')
-        _require_qubits(self.targ)
+        if not isinstance(self.op, WireOp):
+            raise TypeError('op must be a WireOp; use gate() for words')
+        _require_wires(self.targ)
 
     @property
-    def qubits(self) -> frozenset[Qubit]:
+    def qubits(self) -> frozenset[Wire]:
         return frozenset((self.targ,))
 
 
-def gate(value: str | SingleQubitOperator, targ: Qubit) -> Gate:
-    """Apply a word or operator; keep an identity until seq() removes it."""
+def gate(value: str | WireOp, targ: Wire) -> Apply:
+    """Apply a word or operator; retain its wire even for identity."""
     if isinstance(value, str):
         value = op(value)
-    return Gate(value, targ)
+    return Apply(value, targ)
 
 
 @dataclass(frozen=True, slots=True)
-class CZGate:
-    a: Qubit
-    b: Qubit
+class CZ:
+    """Apply |ab> -> (-1)**(a*b) |ab> to two distinct named wires.
+
+    The operands are symmetric and stored in name order. This primitive is
+    its own inverse, so a directly connected equal pair cancels.
+    """
+
+    a: Wire
+    b: Wire
 
     def __post_init__(self) -> None:
-        _require_qubits(self.a, self.b)
+        _require_wires(self.a, self.b)
         a, b = sorted((self.a, self.b), key=lambda q: q.name)
         object.__setattr__(self, 'a', a)
         object.__setattr__(self, 'b', b)
 
     @property
-    def qubits(self) -> frozenset[Qubit]:
+    def qubits(self) -> frozenset[Wire]:
         return frozenset((self.a, self.b))
 
 
 @dataclass(frozen=True, slots=True)
-class CCZGate:
-    a: Qubit
-    b: Qubit
-    c: Qubit
+class CCZ:
+    """Apply |abc> -> (-1)**(a*b*c) |abc> to three distinct named wires.
+
+    All three operands are symmetric and stored in name order. This primitive
+    is its own inverse, so a directly connected equal pair cancels.
+    """
+
+    a: Wire
+    b: Wire
+    c: Wire
 
     def __post_init__(self) -> None:
-        _require_qubits(self.a, self.b, self.c)
+        _require_wires(self.a, self.b, self.c)
         a, b, c = sorted((self.a, self.b, self.c), key=lambda q: q.name)
         object.__setattr__(self, 'a', a)
         object.__setattr__(self, 'b', b)
         object.__setattr__(self, 'c', c)
 
     @property
-    def qubits(self) -> frozenset[Qubit]:
+    def qubits(self) -> frozenset[Wire]:
         return frozenset((self.a, self.b, self.c))
 
 
-Primitive: TypeAlias = Gate | CZGate | CCZGate
-_PRIMITIVE_TYPES = (Gate, CZGate, CCZGate)
+Primitive: TypeAlias = Apply | CZ | CCZ
+Kind: TypeAlias = Literal['CZ', 'CCZ']
+
+
+@dataclass(frozen=True, slots=True)
+class WireSegment:
+    """A wire segment ending at the port that stores this edge.
+
+    The wire name selects a port on the source vertex. None denotes the
+    fragment input on that wire.
+    """
+
+    wire: Wire
+    source: int | None = None
+    op: WireOp = I
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.wire, Wire) or not isinstance(self.op, WireOp):
+            raise TypeError('an edge requires a Wire and a WireOp')
+        if self.source is not None:
+            if type(self.source) is not int:
+                raise TypeError('source must be a vertex index or None')
+            if self.source < 0:
+                raise ValueError('source indices must be nonnegative')
+
+
+@dataclass(frozen=True, slots=True)
+class Intersection:
+    """One CZ or CCZ occurrence, with a paired input and output port on each wire."""
+
+    kind: Kind
+    inputs: tuple[WireSegment, ...]
+
+    def __post_init__(self) -> None:
+        if self.kind not in ('CZ', 'CCZ'):
+            raise ValueError('unknown interaction kind')
+        if not isinstance(self.inputs, tuple) or not all(isinstance(e, WireSegment) for e in self.inputs):
+            raise TypeError('vertex inputs must be a tuple of edges')
+        if len(self.inputs) != (2 if self.kind == 'CZ' else 3):
+            raise ValueError('incorrect number of input ports')
+        wires = tuple(e.wire for e in self.inputs)
+        _require_wires(*wires)
+        # Both gates are symmetric. Permute entire ports, including their labels.
+        object.__setattr__(self, 'inputs', tuple(sorted(self.inputs, key=lambda e: e.wire.name)))
 
 
 @dataclass(frozen=True, slots=True)
 class Seq:
-    """A sequence already normalised under seq()'s local rules.
+    """An open port multigraph. Intersection indices give a topological traversal."""
 
-    Empty is identity. A nonempty Seq contains at least two primitives,
-    no exact identity gates, and no fusible neighbouring single-qubit gates.
-    Use seq() to flatten or simplify input; direct construction validates.
-    """
-
-    parts: tuple[Primitive, ...]
+    wires: tuple[Wire, ...]
+    vertices: tuple[Intersection, ...]
+    outputs: tuple[WireSegment, ...]
 
     def __post_init__(self) -> None:
-        if not isinstance(self.parts, tuple):
-            raise TypeError('Seq.parts must be a tuple; use seq(*parts)')
-        if len(self.parts) == 1:
-            raise ValueError('a singleton is its child; use seq(*parts)')
-        previous = None
-        for part in self.parts:
-            if not isinstance(part, _PRIMITIVE_TYPES):
-                raise TypeError('Seq.parts must contain primitives; use seq() to flatten sequences')
-            if isinstance(part, Gate):
-                if part.op.is_identity:
-                    raise ValueError('Seq cannot store an exact identity gate; use seq()')
-                if isinstance(previous, Gate) and previous.targ == part.targ:
-                    raise ValueError('Seq cannot store fusible neighbours; use seq()')
-            previous = part
+        if not isinstance(self.wires, tuple):
+            raise TypeError('wires must be an ordered tuple of Qubits')
+        _require_wires(*self.wires)
+        if not isinstance(self.vertices, tuple) or not isinstance(self.outputs, tuple):
+            raise TypeError('vertices and outputs must be tuples')
+
+        # One current port per wire enforces acyclicity, linear use and continuity.
+        latest: dict[Wire, int | None] = dict.fromkeys(self.wires)
+        for index, vertex in enumerate(self.vertices):
+            if not isinstance(vertex, Intersection):
+                raise TypeError('expected an Intersection')
+            for edge in vertex.inputs:
+                if edge.wire not in latest or edge.source != latest[edge.wire]:
+                    raise ValueError('vertex input must use the current port on a declared wire')
+                latest[edge.wire] = index
+            source = vertex.inputs[0].source
+            if (
+                source is not None
+                and self.vertices[source].kind == vertex.kind
+                and all(e.source == source and e.op.is_identity for e in vertex.inputs)
+            ):
+                raise ValueError('directly cancellable vertex pair; use seq() to compose a block')
+        if not all(isinstance(e, WireSegment) for e in self.outputs):
+            raise TypeError('outputs must contain edges')
+        if tuple(e.wire for e in self.outputs) != self.wires:
+            raise ValueError('outputs must match the declared wires in order')
+        if any(e.source != latest[e.wire] for e in self.outputs):
+            raise ValueError('output must use the current port on its wire')
 
     @property
-    def qubits(self) -> frozenset[Qubit]:
-        """Referenced wires in this body, not an operation's declared signature."""
-        return frozenset(q for part in self.parts for q in part.qubits)
+    def qubits(self) -> frozenset[Wire]:
+        """The declared interface, including idle wires."""
+        return frozenset(self.wires)
 
 
 Node: TypeAlias = Primitive | Seq
-_EMPTY = Seq(())
 
 
-@dataclass(slots=True)
-class _GateRun:
-    """Temporary mutable run; never stored in a circuit value."""
+def seq(*parts: Node, wires: Iterable[Wire] | None = None) -> Seq:
+    """Compose a block by wire name, reducing wire labels and direct CZ/CCZ pairs.
 
-    targ: Qubit
-    value: _Accumulator
-
-
-def seq(*parts: Node) -> Node:
-    """Compose in execution order and perform exact local normalisation.
-
-    Flatten Seq children, eliminate exact identities, and fuse adjacent
-    same-wire single-qubit operators. Preserve phase-only operations and
-    the order of all other operations. No commutation or gate expansion.
+    Supply an ordered iterable of wires to fix the interface. Otherwise its order
+    follows first appearance, including the complete interfaces of nested Seqs.
     """
-    stack: list[Primitive | _GateRun] = []
-    # Reverse traversal lets each run use constant-time right-product steps.
-    # Freeze each surviving run once, avoiding repeated copies of its axes.
-    for part in reversed(parts):
-        if isinstance(part, Seq):
-            children = part.parts
-        elif isinstance(part, _PRIMITIVE_TYPES):
-            children = (part,)
+    if isinstance(wires, (set, frozenset)):
+        raise TypeError('wires requires an ordered iterable such as a tuple or list')
+    boundary = None if wires is None else tuple(wires)
+    if boundary is not None:
+        _require_wires(*boundary)
+    if len(parts) == 1 and isinstance(parts[0], Seq) and boundary in (None, parts[0].wires):
+        return parts[0]
+
+    latest: dict[Wire, int | None] = dict.fromkeys(boundary or ())
+    vertices: dict[int, Intersection] = {}
+    next_index = 0
+
+    # A source port identifies one segment. Its factors can stay here even
+    # after a vertex closes it: erasing that vertex reopens the same segment.
+    runs: dict[tuple[Wire, int | None], list[WireOp]] = {}
+
+    def add(wire: Wire, value: WireOp) -> None:
+        source = latest.setdefault(wire, None)
+        if not value.is_identity:
+            runs.setdefault((wire, source), []).append(value)
+
+    def take_label(
+        wire: Wire, source: int | None, suffix: WireOp = I,
+    ) -> WireOp:
+        factors = runs.pop((wire, source), None)
+        if not factors:
+            return suffix
+        if not suffix.is_identity:
+            factors.append(suffix)
+        return factors[0] if len(factors) == 1 else op(*factors)
+
+    def is_clear(wire: Wire) -> bool:
+        # Only a candidate pair needs its intervening product now. Cache a
+        # nonidentity result for the surviving edge.
+        label = take_label(wire, latest[wire])
+        if label.is_identity:
+            return True
+        add(wire, label)
+        return False
+
+    def interact(kind: Kind, operands: tuple[Wire, ...]) -> None:
+        nonlocal next_index
+        source = latest.get(operands[0])
+        if (
+            source is not None
+            and vertices[source].kind == kind
+            and all(latest.get(w) == source for w in operands)
+            and all(is_clear(w) for w in operands)
+        ):
+            for edge in vertices.pop(source).inputs:
+                latest[edge.wire] = edge.source
+                add(edge.wire, edge.op)
+            return
+
+        inputs = tuple(WireSegment(w, latest.get(w)) for w in operands)
+        vertices[next_index] = Intersection(kind, inputs)
+        for wire in operands:
+            latest[wire] = next_index
+        next_index += 1
+
+    def append_graph(body: Seq) -> None:
+        nonlocal next_index
+        for wire in body.wires:
+            latest.setdefault(wire, None)
+        if next_index == 0 and not runs:
+            # The first reduced body can share its vertices. Its stored input
+            # labels rejoin the pending factors if a later join erases a vertex.
+            vertices.update(enumerate(body.vertices))
+            next_index = len(body.vertices)
+            for edge in body.outputs:
+                latest[edge.wire] = edge.source
         else:
-            raise TypeError('seq() accepts primitive operations and Seq values')
-        for child in reversed(children):
-            if isinstance(child, Gate):
-                if child.op.is_identity:
-                    continue
-                if stack and isinstance(stack[-1], (Gate, _GateRun)) and stack[-1].targ == child.targ:
-                    previous = stack.pop()
-                    run = previous if isinstance(previous, _GateRun) else _GateRun(previous.targ, _Accumulator(previous.op))
-                    run.value.right_operator(child.op)
-                    if run.value.is_identity:
-                        continue
-                    stack.append(run)
-                    continue
-            stack.append(child)
-    if not stack:
-        return _EMPTY
-    normal = tuple(
-        Gate(part.value.freeze(), part.targ) if isinstance(part, _GateRun) else part
-        for part in reversed(stack)
-    )
-    if len(normal) == 1:
-        return normal[0]
-    return Seq(normal)
+            for vertex in body.vertices:
+                for edge in vertex.inputs:
+                    add(edge.wire, edge.op)
+                interact(vertex.kind, tuple(e.wire for e in vertex.inputs))
+        for edge in body.outputs:
+            add(edge.wire, edge.op)
+
+    for part in parts:
+        if isinstance(part, Apply):
+            add(part.targ, part.op)
+        elif isinstance(part, CZ):
+            interact('CZ', (part.a, part.b))
+        elif isinstance(part, CCZ):
+            interact('CCZ', (part.a, part.b, part.c))
+        elif isinstance(part, Seq):
+            append_graph(part)
+        else:
+            raise TypeError('seq() accepts gate applications and Seq values')
+
+    if boundary is not None and len(boundary) != len(latest):
+        raise ValueError('circuit uses a wire outside the declared interface')
+
+    # Compact indices only once. Retain original records wherever the source
+    # port and the exact label still agree.
+    moved: dict[int, int] = {}
+
+    def finish_edge(edge: WireSegment) -> WireSegment:
+        value = take_label(edge.wire, edge.source, edge.op)
+        source = moved.get(edge.source, edge.source) if edge.source is not None else None
+        if source == edge.source and value == edge.op:
+            return edge
+        return WireSegment(edge.wire, source, value)
+
+    result: list[Intersection] = []
+    for old, vertex in vertices.items():
+        if old != len(result):
+            moved[old] = len(result)
+        inputs = tuple(finish_edge(e) for e in vertex.inputs)
+        result.append(vertex if inputs == vertex.inputs else Intersection(vertex.kind, inputs))
+    outputs = tuple(finish_edge(WireSegment(wire, source)) for wire, source in latest.items())
+    return Seq(tuple(latest), tuple(result), outputs)

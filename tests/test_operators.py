@@ -4,7 +4,7 @@ import random
 import unittest
 
 from quantum_circuits import (
-    H, I, S, T, X, Y, Z, SingleQubitClifford, SingleQubitOperator, clifford, op,
+    H, I, S, T, X, Y, Z, Clif, WireOp, clifford, op,
 )
 from tests import exact_reference as exact
 from tests.reference import dagger, mm, operator_matrix, word_matrix
@@ -39,15 +39,15 @@ class OperatorTests(unittest.TestCase):
         self.assertEqual(op('HTH').axes, 'x')
         self.assertEqual(op('SSSHTHS').axes, 'y')
         for value in (I, X, Y, Z, H, S, T, op()):
-            self.assertIs(type(value), SingleQubitOperator)
+            self.assertIs(type(value), WireOp)
 
     def test_validation_and_operator_types(self):
         for axes in ('xx', 'xyzz', 'X', ' x', 'x y', 'T', 'a'):
             with self.assertRaises(ValueError):
-                SingleQubitOperator(I.initial, axes)
+                WireOp(I.initial, axes)
         for initial, axes in ((I, ''), (None, ''), (I.initial, []), (I.initial, 0)):
             with self.assertRaises(TypeError):
-                SingleQubitOperator(initial, axes)
+                WireOp(initial, axes)
         for value in (None, 1, ['H'], {'H'}, 1j):
             with self.assertRaises(TypeError):
                 op(value)
@@ -67,8 +67,8 @@ class OperatorTests(unittest.TestCase):
             pow(T, 2, 3)
 
     def test_repr_immutability_and_properties(self):
-        self.assertEqual(repr(op('HTH')), "SingleQubitOperator(phase=0, rep=0, pauli=0, axes='x')")
-        self.assertEqual(repr(S), "SingleQubitOperator(phase=0, rep=2, pauli=0, axes='')")
+        self.assertEqual(repr(op('HTH')), "WireOp(phase=0, rep=0, pauli=0, axes='x')")
+        self.assertEqual(repr(S), "WireOp(phase=0, rep=2, pauli=0, axes='')")
         self.assertEqual(str(T), repr(T))
         self.assertFalse(hasattr(T, '__dict__'))
         for name, value in (('axes', ''), ('initial', H.initial)):
@@ -113,7 +113,7 @@ class OperatorTests(unittest.TestCase):
                 axis_products[axes] = exact.product(exact.AXES[axes[-1]], axis_products[axes[:-1]])
             for frame in range(24):
                 for phase in range(8):
-                    value = SingleQubitOperator(SingleQubitClifford(frame, phase), axes)
+                    value = WireOp(Clif(frame, phase), axes)
                     matrix = exact.product(axis_products[axes], exact.CLIFFORDS[8 * frame + phase])
                     self.assertNotIn(matrix, seen, value)
                     seen.add(matrix)
@@ -124,7 +124,7 @@ class OperatorTests(unittest.TestCase):
         for axes in canonical_axes(3):
             for frame in range(24):
                 for phase in range(8):
-                    value = SingleQubitOperator(SingleQubitClifford(frame, phase), axes)
+                    value = WireOp(Clif(frame, phase), axes)
                     inverse = value.inverse()
                     self.assertEqual(inverse @ value, I)
                     self.assertEqual(value @ inverse, I)
@@ -142,9 +142,9 @@ class OperatorTests(unittest.TestCase):
 
     def test_all_signed_axis_conjugations(self):
         for frame in range(24):
-            c = op(SingleQubitClifford(frame))
+            c = op(Clif(frame))
             for axes in ('x', 'y', 'z'):
-                t = SingleQubitOperator(I.initial, axes)
+                t = WireOp(I.initial, axes)
                 for value in (c @ t, t @ c, c @ t @ c.inverse()):
                     self.assertEqual(value.t_count, 1)
                 self.assertMatrixClose(operator_matrix(c @ t), mm(operator_matrix(c), operator_matrix(t)))

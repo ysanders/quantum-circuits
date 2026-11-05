@@ -3,7 +3,7 @@
 import cmath
 import math
 
-from quantum_circuits import CCZGate, CZGate, Gate, Seq
+from quantum_circuits import CCZ, CZ, Apply
 
 IDENTITY = (1, 0, 0, 1)
 PAULI_X = (0, 1, 1, 0)
@@ -63,12 +63,15 @@ def word_matrix(word):
     return result
 
 
-def leaves(node):
-    if isinstance(node, Seq):
-        for child in node.parts:
-            yield from leaves(child)
-    else:
-        yield node
+def leaves(body):
+    """Interpret graph labels on named wires for the independent matrix oracle."""
+    for vertex in body.vertices:
+        for edge in vertex.inputs:
+            yield Apply(edge.op, edge.wire)
+        interaction = CZ if vertex.kind == 'CZ' else CCZ
+        yield interaction(*(edge.wire for edge in vertex.inputs))
+    for edge in body.outputs:
+        yield Apply(edge.op, edge.wire)
 
 
 def apply(operations, wires, input_index):
@@ -77,7 +80,7 @@ def apply(operations, wires, input_index):
     vector = [0j] * (1 << len(wires))
     vector[input_index] = 1
     for op in operations:
-        if isinstance(op, Gate):
+        if isinstance(op, Apply):
             u = operator_matrix(op.op)
             mask = 1 << positions[op.targ]
             out = vector.copy()
@@ -87,7 +90,7 @@ def apply(operations, wires, input_index):
                     out[j] = u[0] * v0 + u[1] * v1
                     out[j | mask] = u[2] * v0 + u[3] * v1
             vector = out
-        elif isinstance(op, (CZGate, CCZGate)):
+        elif isinstance(op, (CZ, CCZ)):
             mask = sum(1 << positions[q] for q in op.qubits)
             vector = [-v if j & mask == mask else v for j, v in enumerate(vector)]
         else:

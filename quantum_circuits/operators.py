@@ -11,22 +11,22 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 
 from .clifford import H as _H, I as _I, S as _S, X as _X, Y as _Y, Z as _Z
-from .clifford import SingleQubitClifford
+from .clifford import Clif
 from ._clifford_tables import CLIFFORD_WORDS, PAULI_ACTION
 
-__all__ = ['SingleQubitOperator', 'op', 'I', 'X', 'Y', 'Z', 'H', 'S', 'T']
+__all__ = ['WireOp', 'op', 'I', 'X', 'Y', 'Z', 'H', 'S', 'T']
 
 _AXES = 'xyz'
 # S_a = T_a**2; all are exact Clifford values.
 _SQUARES = (_H @ _S @ _H, _S @ _H @ _S @ _H @ _S.inverse(), _S)
 _INVERSE_SQUARES = tuple(c.inverse() for c in _SQUARES)
-_OMEGA = SingleQubitClifford(0, 1)
+_OMEGA = Clif(0, 1)
 _NEGATIVE_CORRECTIONS = tuple(_OMEGA @ c for c in _INVERSE_SQUARES)
 _AXIS_WORDS = ('HTH', 'SSSHTHS', 'T')  # execution order
 
 
 @dataclass(frozen=True, slots=True, repr=False)
-class SingleQubitOperator:
+class WireOp:
     """A canonical Clifford followed by positive, alternating axis T gates.
 
     Raw construction validates already-canonical fields; use op() to reduce
@@ -34,12 +34,12 @@ class SingleQubitOperator:
     No floating-point arithmetic or length limit is involved.
     """
 
-    initial: SingleQubitClifford
+    initial: Clif
     axes: str = ''
 
     def __post_init__(self) -> None:
-        if not isinstance(self.initial, SingleQubitClifford):
-            raise TypeError('initial must be a SingleQubitClifford')
+        if not isinstance(self.initial, Clif):
+            raise TypeError('initial must be a Clif')
         if not isinstance(self.axes, str):
             raise TypeError('axes must be a string')
         previous = None
@@ -64,15 +64,15 @@ class SingleQubitOperator:
         """Exact identity; a nontrivial scalar phase is not identity."""
         return not self.axes and self.initial.is_identity
 
-    def __matmul__(self, other: SingleQubitOperator) -> SingleQubitOperator:
+    def __matmul__(self, other: WireOp) -> WireOp:
         """Matrix product: apply other, then self."""
-        if not isinstance(other, SingleQubitOperator):
+        if not isinstance(other, WireOp):
             return NotImplemented
         result = _Accumulator(self)
         result.right_operator(other)
         return result.freeze()
 
-    def inverse(self) -> SingleQubitOperator:
+    def inverse(self) -> WireOp:
         """Exact adjoint, returned in canonical form."""
         result = _Accumulator()
         result.right_clifford(self.initial.inverse())
@@ -83,7 +83,7 @@ class SingleQubitOperator:
             result.right_axis(index)
         return result.freeze()
 
-    def __pow__(self, exponent: int) -> SingleQubitOperator:
+    def __pow__(self, exponent: int) -> WireOp:
         """Integer powers; zero is I and negative powers use the inverse."""
         if type(exponent) is not int:
             raise TypeError('exponent must be an integer (not a boolean)')
@@ -112,7 +112,7 @@ class SingleQubitOperator:
     def __repr__(self) -> str:
         c = self.initial
         return (
-            f'SingleQubitOperator(phase={c.phase}, rep={c.rep}, '
+            f'WireOp(phase={c.phase}, rep={c.rep}, '
             f'pauli={c.pauli}, axes={self.axes!r})'
         )
 
@@ -130,15 +130,11 @@ class _Accumulator:
 
     __slots__ = ('initial', 'axes')
 
-    def __init__(self, value: SingleQubitOperator | None = None) -> None:
+    def __init__(self, value: WireOp | None = None) -> None:
         self.initial = _I if value is None else value.initial
         self.axes = [] if value is None else list(reversed(value.axes))
 
-    @property
-    def is_identity(self) -> bool:
-        return not self.axes and self.initial.is_identity
-
-    def right_clifford(self, value: SingleQubitClifford) -> None:
+    def right_clifford(self, value: Clif) -> None:
         self.initial = self.initial @ value
 
     def right_axis(self, axis: int) -> None:
@@ -153,24 +149,24 @@ class _Accumulator:
         else:
             self.axes.append(letter)
 
-    def right_operator(self, value: SingleQubitOperator) -> None:
+    def right_operator(self, value: WireOp) -> None:
         for axis in reversed(value.axes):
             self.right_axis(_AXES.index(axis))
         self.right_clifford(value.initial)
 
-    def freeze(self) -> SingleQubitOperator:
-        return SingleQubitOperator(self.initial, ''.join(reversed(self.axes)))
+    def freeze(self) -> WireOp:
+        return WireOp(self.initial, ''.join(reversed(self.axes)))
 
 
-I, X, Y, Z, H, S = (SingleQubitOperator(c) for c in (_I, _X, _Y, _Z, _H, _S))
-T = SingleQubitOperator(_I, 'z')
+I, X, Y, Z, H, S = (WireOp(c) for c in (_I, _X, _Y, _Z, _H, _S))
+T = WireOp(_I, 'z')
 _NAMED_CLIFFORDS = dict(zip('IXYZHS', (_I, _X, _Y, _Z, _H, _S)))
 
 
 def op(
-    *parts: str | SingleQubitClifford | SingleQubitOperator,
+    *parts: str | Clif | WireOp,
     phase: int = 0,
-) -> SingleQubitOperator:
+) -> WireOp:
     """Compose in execution order and multiply by omega**phase.
 
     Strings contain I/X/Y/Z/H/S/T; whitespace is ignored. Clifford values
@@ -193,12 +189,12 @@ def op(
                     except KeyError:
                         raise ValueError(f'unknown operator letter {letter!r}; use IXYZHST') from None
                     result.right_clifford(value)
-        elif isinstance(part, SingleQubitClifford):
+        elif isinstance(part, Clif):
             result.right_clifford(part)
-        elif isinstance(part, SingleQubitOperator):
+        elif isinstance(part, WireOp):
             result.right_operator(part)
         else:
-            raise TypeError('op() accepts words, SingleQubitClifford, and SingleQubitOperator values')
+            raise TypeError('op() accepts words, Clif, and WireOp values')
     if phase % 8:
-        result.right_clifford(SingleQubitClifford(0, phase))
+        result.right_clifford(Clif(0, phase))
     return result.freeze()
