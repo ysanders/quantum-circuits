@@ -151,15 +151,28 @@ class Intersection:
         object.__setattr__(self, 'inputs', tuple(sorted(self.inputs, key=lambda e: _wire_key(e.wire))))
 
 
+def _require_unphased(edges: tuple[WireSegment, ...]) -> None:
+    if any(e.op.phase for e in edges):
+        raise ValueError('a scalar phase belongs in Seq.phase, not on a wire segment')
+
+
 @dataclass(frozen=True, slots=True)
 class Seq:
-    """An open port multigraph. Intersection indices give a topological traversal."""
+    """An open port multigraph. Intersection indices give a topological traversal.
+
+    The circuit is omega**phase times the graph, omega = exp(i*pi/4). A scalar
+    has no position, so labels inside a Seq carry none.
+    """
 
     wires: tuple[Wire, ...]
     vertices: tuple[Intersection, ...]
     outputs: tuple[WireSegment, ...]
+    phase: int = 0
 
     def __post_init__(self) -> None:
+        if type(self.phase) is not int:
+            raise TypeError('phase must be an integer (not a boolean)')
+        object.__setattr__(self, 'phase', self.phase % 8)
         if not isinstance(self.wires, tuple):
             raise TypeError('wires must be an ordered tuple of Wire values')
         _require_wires(*self.wires)
@@ -175,6 +188,7 @@ class Seq:
                 if edge.wire not in latest or edge.source != latest[edge.wire]:
                     raise ValueError('vertex input must use the current port on a declared wire')
                 latest[edge.wire] = index
+            _require_unphased(vertex.inputs)
             source = vertex.inputs[0].source
             if (
                 source is not None
@@ -188,6 +202,7 @@ class Seq:
             raise ValueError('outputs must match the declared wires in order')
         if any(e.source != latest[e.wire] for e in self.outputs):
             raise ValueError('output must use the current port on its wire')
+        _require_unphased(self.outputs)
 
     @property
     def qubits(self) -> frozenset[Wire]:
@@ -204,11 +219,15 @@ class Builder:
     add() costs time proportional to the part it appends. A loop of add()
     calls is therefore linear, where a loop of seq(acc, part) calls walks the
     accumulated graph on every iteration. seq(*parts) is one Builder.
+    The circuit starts as omega**phase times the identity.
     """
 
-    __slots__ = ('_boundary', '_latest', '_vertices', '_next', '_runs')
+    __slots__ = ('_boundary', '_latest', '_vertices', '_next', '_runs', '_phase')
 
-    def __init__(self, wires: Iterable[Wire] | None = None) -> None:
+    def __init__(self, wires: Iterable[Wire] | None = None, phase: int = 0) -> None:
+        if type(phase) is not int:
+            raise TypeError('phase must be an integer (not a boolean)')
+        self._phase = phase
         if isinstance(wires, (set, frozenset)):
             raise TypeError('wires requires an ordered iterable such as a tuple or list')
         self._boundary = None if wires is None else tuple(wires)
@@ -257,7 +276,7 @@ class Builder:
             inputs = tuple(finish(e) for e in vertex.inputs)
             result.append(vertex if inputs == vertex.inputs else Intersection(vertex.kind, inputs))
         outputs = tuple(finish(WireSegment(wire, source)) for wire, source in self._latest.items())
-        body = Seq(tuple(self._latest), tuple(result), outputs)
+        body = Seq(tuple(self._latest), tuple(result), outputs, self._phase)
         self._resume(body)
         return body
 
@@ -269,8 +288,14 @@ class Builder:
 
     def _label(self, wire: Wire, value: WireOp) -> None:
         self._declare(wire)
+        value = self._unphased(value)
         if not value.is_identity:
             self._runs.setdefault((wire, self._latest[wire]), []).append(value)
+
+    def _unphased(self, value: WireOp) -> WireOp:
+        """Move a label's scalar factor to the circuit."""
+        self._phase += value.phase
+        return value.unphased()
 
     def _take(self, wire: Wire, source: int | None, suffix: WireOp = I) -> WireOp:
         """Remove and return the product of a segment's factors, then suffix."""
@@ -279,7 +304,8 @@ class Builder:
             return suffix
         if not suffix.is_identity:
             factors.append(suffix)
-        return factors[0] if len(factors) == 1 else op(*factors)
+        # Factors are stored without scalars; only a product can create one.
+        return factors[0] if len(factors) == 1 else self._unphased(op(*factors))
 
     def _is_clear(self, wire: Wire) -> bool:
         # Only a candidate pair needs its intervening product now. Cache a
@@ -314,6 +340,7 @@ class Builder:
     def _graph(self, body: Seq) -> None:
         for wire in body.wires:
             self._declare(wire)
+        self._phase += body.phase
         if self._next == 0 and not self._runs:
             self._resume(body, declared=True)
             return
@@ -340,13 +367,17 @@ class Builder:
             self._label(edge.wire, edge.op)
 
 
-def seq(*parts: Node, wires: Iterable[Wire] | None = None) -> Seq:
+def seq(*parts: Node, wires: Iterable[Wire] | None = None, phase: int = 0) -> Seq:
     """Compose a block by wire name, reducing wire labels and direct CZ/CCZ pairs.
 
     Supply an ordered iterable of wires to fix the interface. Otherwise its order
     follows first appearance, including the complete interfaces of nested Seqs.
+    The result is multiplied by omega**phase.
     """
-    builder = Builder(wires)
-    if len(parts) == 1 and isinstance(parts[0], Seq) and builder._boundary in (None, parts[0].wires):
+    builder = Builder(wires, phase)
+    if (
+        len(parts) == 1 and isinstance(parts[0], Seq) and not phase % 8
+        and builder._boundary in (None, parts[0].wires)
+    ):
         return parts[0]
     return builder.add(*parts).freeze()

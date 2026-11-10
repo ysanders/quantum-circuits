@@ -100,18 +100,19 @@ assert Apply(H, q).qubits == frozenset((q,))
 
 ## Circuit graphs
 
-`seq(*parts, wires=None) -> Seq` accepts `Apply`, `CZ`, `CCZ`, and
+`seq(*parts, wires=None, phase=0) -> Seq` accepts `Apply`, `CZ`, `CCZ`, and
 existing graphs in execution order. `gate(value, q)` constructs a one-wire
 application from an operator or word. CZ and CCZ apply a minus sign exactly
 when all their participating bits are one. Each requires distinct named wires.
 
-A `Seq` stores three tuples.
+A `Seq` stores three tuples and a scalar phase.
 
 | Field | Meaning |
 | --- | --- |
 | `wires` | Ordered boundary wires. Equal names identify the same wire. |
 | `vertices` | CZ and CCZ occurrences in topological order. A vertex's index identifies the occurrence within this graph. |
 | `outputs` | One incoming edge per output port, in boundary order. |
+| `phase` | An integer modulo eight. The circuit is `omega**phase` times the graph, where `omega = exp(i*pi/4)`. |
 
 `Intersection(kind, inputs)` uses the string `'CZ'` or `'CCZ'` and two or three
 input edges respectively. The constructor orders its symmetric ports by wire
@@ -132,11 +133,31 @@ with zero wires, and `seq(wires=(q,))` gives the identity on one wire.
 Pass `body.wires` to reuse an ordered interface.
 
 Composition connects ports by name. Processing labelled `U` followed by
-processing labelled `V` gives the canonical label `V @ U`, including phase.
+processing labelled `V` gives the canonical label `V @ U`. Its scalar factor
+moves to the graph's `phase`.
 Only an interaction touching a wire closes its current segment. A nested
 `Seq` contributes its vertices in traversal order and joins its boundary
 labels to the surrounding segments. Equality and hashing compare the stored
 fields, including the chosen boundary and traversal orders.
+
+### Scalar phase
+
+A scalar has no position in a circuit, so a `Seq` stores it once. `seq`
+collects the scalar factor of every operator it is given and adds the `phase`
+argument. The labels inside a `Seq` carry no scalar; raw construction rejects
+a label that does.
+
+```python
+from quantum_circuits import CZ, Wire, gate, op, seq
+
+a, b = Wire("a"), Wire("b")
+omega = op(phase=1)
+on_a = seq(gate(omega, a), wires=(a, b))
+on_b = seq(gate(omega, b), wires=(a, b))
+assert on_a == on_b == seq(wires=(a, b), phase=1)
+assert seq(CZ(a, b), gate(omega, a), CZ(a, b)) == on_a
+assert seq(on_a, on_b).phase == 2
+```
 
 ### Which operations share a wire segment?
 
@@ -164,9 +185,10 @@ put the H gates on two separate edges.
 `seq` erases two occurrences of the same interaction when all inputs of the
 later occurrence lead directly to the earlier one and every connecting label
 is exact identity. An operation on a disjoint wire may lie between them in
-traversal order. A nontrivial scalar phase or a T on a connecting edge
-blocks the match. Raw `Seq(wires, vertices, outputs)` construction validates
-this invariant and raises `ValueError` on a directly cancellable pair.
+traversal order. A T on a connecting edge blocks the match. A scalar phase
+does not, because it is not stored on an edge. Raw
+`Seq(wires, vertices, outputs, phase=0)` construction validates this
+invariant and raises `ValueError` on a directly cancellable pair.
 
 During construction, wire factors stay in execution order. Removing a vertex
 reopens its incoming segments. Their factors can accumulate until another
@@ -305,6 +327,8 @@ All top-level constants `I`, `X`, `Y`, `Z`, `H`, `S`, `T` have type
 | `u.t_count` | `len(u.axes)`, minimal T-count for the isolated exact operator |
 | `u.is_clifford` | Whether axes are empty |
 | `u.is_identity` | Empty axes and an initial Clifford exactly equal to I |
+| `u.phase` | The exponent `k` of the scalar factor `omega**k` in the canonical form |
+| `u.unphased()` | `u` divided by `omega**u.phase` |
 | `a @ b` | Apply b, then a; returns a canonical operator |
 | `u.inverse()` | Exact inverse/adjoint, in canonical form |
 | `u ** n` | Integer power; zero gives I, negative powers use the inverse |

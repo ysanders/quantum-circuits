@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from quantum_circuits import CCZ, CZ, H, Wire, S, T, gate, op, seq
 from quantum_circuits.operators import _Accumulator
-from tests.reference import apply, leaves
+from tests.reference import apply, evaluate
 
 
 class CancelPairsTests(unittest.TestCase):
@@ -24,7 +24,7 @@ class CancelPairsTests(unittest.TestCase):
         a, b, c, d = self.wires
         for interaction in (CZ(a, b), CCZ(a, b, c)):
             for wire in interaction.qubits:
-                for op_on_wire in (H, T, op(phase=1)):
+                for op_on_wire in (H, T):
                     body = seq(interaction, gate(op_on_wire, wire), interaction)
                     self.assertEqual(len(body.vertices), 2)
         for interactions in (
@@ -112,11 +112,9 @@ class CancelPairsTests(unittest.TestCase):
             body = seq(*raw, wires=wires)
             cut = rng.randrange(len(raw) + 1)
             joined = seq(seq(*raw[:cut]), seq(*raw[cut:]), wires=wires)
-            reduced = tuple(leaves(body))
-            composed = tuple(leaves(joined))
             for basis in range(8):
                 expected = apply(raw, wires, basis)
-                actual = apply(reduced, wires, basis)
+                actual = evaluate(body, wires, basis)
                 self.assertLess(max(abs(a - b) for a, b in zip(actual, expected)), 1e-12)
-                actual = apply(composed, wires, basis)
+                actual = evaluate(joined, wires, basis)
                 self.assertLess(max(abs(a - b) for a, b in zip(actual, expected)), 1e-12)

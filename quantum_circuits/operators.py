@@ -23,6 +23,7 @@ _INVERSE_SQUARES = tuple(c.inverse() for c in _SQUARES)
 _OMEGA = Clif(0, 1)
 _NEGATIVE_CORRECTIONS = tuple(_OMEGA @ c for c in _INVERSE_SQUARES)
 _AXIS_WORDS = ('HTH', 'SSSHTHS', 'T')  # execution order
+_PHASE_FREE = tuple(Clif(frame) for frame in range(24))
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -58,6 +59,17 @@ class WireOp:
     @property
     def is_clifford(self) -> bool:
         return not self.axes
+
+    @property
+    def phase(self) -> int:
+        """The exponent k in this operator's scalar factor omega**k."""
+        return self.initial.phase
+
+    def unphased(self) -> WireOp:
+        """This operator divided by omega**phase."""
+        if not self.initial.phase:
+            return self
+        return WireOp(_PHASE_FREE[self.initial.frame], self.axes)
 
     @property
     def is_identity(self) -> bool:

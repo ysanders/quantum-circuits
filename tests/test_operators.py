@@ -91,6 +91,18 @@ class OperatorTests(unittest.TestCase):
         self.assertEqual({op('TT'): 7}[S], 7)
         self.assertEqual(hash(op('HTH')), hash(H @ T @ H))
 
+    def test_scalar_factor_of_every_bounded_canonical_value(self):
+        for frame in range(24):
+            for axes in canonical_axes(3):
+                bare = WireOp(Clif(frame), axes)
+                self.assertEqual(bare.phase, 0)
+                self.assertIs(bare.unphased(), bare)
+                for k in range(1, 8):
+                    value = WireOp(Clif(frame, k), axes)
+                    self.assertEqual(value.phase, k)
+                    self.assertEqual(value.unphased(), bare)
+                    self.assertEqual(op(bare, phase=k), value)
+
     def test_exact_short_words(self):
         # Every H/S/T word through length six, retaining full phase.
         matrix_cache = {}
