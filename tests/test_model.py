@@ -57,6 +57,22 @@ class ModelTests(unittest.TestCase):
         self.assertEqual(expected.qubits, frozenset((self.a, self.b, self.t)))
         self.assertEqual(gate(T, self.t).qubits, frozenset((self.t,)))
 
+    def test_symmetric_ports_use_natural_name_order(self):
+        ordered = ['', '9', '10', 'a', 'a9', 'a9b', 'a10', 'a10a', 'b', 'q02', 'q2', 'q10', 'q٣']
+        for i, low in enumerate(ordered):
+            for high in ordered[i + 1:]:
+                first, second = Wire(low), Wire(high)
+                with self.subTest(low=low, high=high):
+                    for cz in (CZ(first, second), CZ(second, first)):
+                        self.assertEqual((cz.a, cz.b), (first, second))
+                    vertex = Intersection('CZ', (WireSegment(second), WireSegment(first)))
+                    self.assertEqual(tuple(e.wire for e in vertex.inputs), (first, second))
+        register = [Wire(f'r{i}') for i in range(12)]
+        ccz = CCZ(register[11], register[9], register[10])
+        self.assertEqual((ccz.a, ccz.b, ccz.c), tuple(register[9:12]))
+        self.assertEqual(seq(*(CZ(b, a) for a, b in zip(register, register[1:]))).wires,
+                         tuple(register))
+
     def test_invalid_gate_operands(self):
         for make in (
             lambda: Apply('H', self.a), lambda: Apply(H, 'a'),

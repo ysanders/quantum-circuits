@@ -116,7 +116,9 @@ A `Seq` stores three tuples and a scalar phase.
 
 `Intersection(kind, inputs)` uses the string `'CZ'` or `'CCZ'` and two or three
 input edges respectively. The constructor orders its symmetric ports by wire
-name. Each port continues the same wire on the output side.
+name. Runs of ASCII digits compare as integers, so `q2` precedes `q10`; the
+name itself breaks a tie such as `q2` and `q02`. Each port continues the same
+wire on the output side.
 
 `WireSegment(wire, source=None, op=I)` identifies its source port by vertex index and
 wire. `None` means the input boundary on that wire. The destination owns the

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+from functools import lru_cache
+import re
 from typing import Literal, TypeAlias
 
 from .operators import I, WireOp, op
@@ -23,9 +25,23 @@ class Wire:
         return f'Wire({self.name!r})'
 
 
-def _wire_key(wire: Wire) -> str:
-    """The order in which symmetric ports are stored."""
-    return wire.name
+_DIGITS = re.compile('([0-9]+)')
+
+
+@lru_cache(maxsize=1 << 16)
+def _name_key(name: str) -> tuple:
+    pieces = _DIGITS.split(name)  # text, digits, text, digits, ..., text
+    pieces[1::2] = map(int, pieces[1::2])
+    return tuple(pieces), name
+
+
+def _wire_key(wire: Wire) -> tuple:
+    """The order in which symmetric ports are stored.
+
+    Runs of ASCII digits compare as integers, so q2 precedes q10. The name
+    itself breaks ties such as q2 and q02.
+    """
+    return _name_key(wire.name)
 
 
 def _require_wires(*wires: Wire) -> None:
