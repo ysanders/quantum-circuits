@@ -209,6 +209,20 @@ class Seq:
         """The declared interface, including idle wires."""
         return frozenset(self.wires)
 
+    def inverse(self) -> Seq:
+        """Exact adjoint, on the same ordered interface.
+
+        seq(body, body.inverse()) is the identity graph on body.wires.
+        """
+        builder = Builder(self.wires, -self.phase)
+        for edge in self.outputs:
+            builder._label(edge.wire, edge.op.inverse())
+        for vertex in reversed(self.vertices):
+            builder._interact(vertex.kind, tuple(e.wire for e in vertex.inputs))
+            for edge in vertex.inputs:
+                builder._label(edge.wire, edge.op.inverse())
+        return builder.freeze()
+
 
 Node: TypeAlias = Primitive | Seq
 

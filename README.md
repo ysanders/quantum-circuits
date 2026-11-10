@@ -209,6 +209,20 @@ right = seq(CCZ(c, b, a), CZ(b, a))
 assert seq(left, right) == seq(wires=left.wires)
 ```
 
+### Inverse
+
+`body.inverse()` returns the exact adjoint on the same ordered interface. It
+reverses the vertices, inverts every label and negates the phase.
+
+```python
+from quantum_circuits import CCZ, CZ, H, T, Wire, gate, seq
+
+a, b, c = map(Wire, "abc")
+compute = seq(gate(H, c), CCZ(a, b, c), gate(H, c), gate(T, a), CZ(a, b))
+assert seq(compute, compute.inverse()) == seq(wires=compute.wires)
+assert compute.inverse().inverse() == compute
+```
+
 ### Building incrementally
 
 `Builder(wires=None)` holds a circuit under construction. `add(*parts)`
@@ -452,7 +466,7 @@ See [Selinger, Theorem 3.12](https://www.mscs.dal.ca/~selinger/papers/graphical.
 | Area | Status |
 | --- | --- |
 | Exact Clifford and canonical single-qubit Clifford+T algebra | Implemented, including composition, inversion, integer powers, and exact lowering |
-| Open port graphs and composition by wire | Implemented |
+| Open port graphs, composition by wire, inverse | Implemented |
 | CZ and CCZ | Direct pair cancellation during construction and composition |
 | Contracts, named fragments, compact traversal such as `zipWith` | Planned |
 | Preparation, measurement, classical control | Deferred |
