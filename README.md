@@ -211,6 +211,34 @@ right = seq(CCZ(c, b, a), CZ(b, a))
 assert seq(left, right) == seq(wires=left.wires)
 ```
 
+### Commuting interactions
+
+CZ and CCZ are diagonal. Two interactions therefore commute when every wire
+they share carries only identity labels between them. `seq` keeps
+interactions in the order written and cancels only directly connected pairs.
+`canonical_order(body)` is an explicit pass that reorders commuting
+interactions and cancels the pairs this exposes.
+
+```python
+from quantum_circuits import CZ, Wire, canonical_order, seq
+
+a, b, c, d = map(Wire, "abcd")
+body = seq(CZ(a, b), CZ(b, c), CZ(a, b))
+assert len(body.vertices) == 3
+assert canonical_order(body) == seq(CZ(b, c), wires=(a, b, c))
+
+wires = (a, b, c, d)
+first, second = seq(CZ(a, b), CZ(c, d), wires=wires), seq(CZ(c, d), CZ(a, b), wires=wires)
+assert first != second
+assert canonical_order(first) == canonical_order(second) == first
+```
+
+The pass returns the same graph for any two circuits that differ only by
+exchanging commuting interactions, exchanging operations on disjoint wires,
+or inserting and removing adjacent equal pairs. Any other label between two
+interactions fixes their order. That includes a diagonal label such as T,
+which commutes with CZ and CCZ as a matrix: the pass does not move labels.
+
 ### Inverse
 
 `body.inverse()` returns the exact adjoint on the same ordered interface. It
@@ -469,7 +497,7 @@ See [Selinger, Theorem 3.12](https://www.mscs.dal.ca/~selinger/papers/graphical.
 | --- | --- |
 | Exact Clifford and canonical single-qubit Clifford+T algebra | Implemented, including composition, inversion, integer powers, and exact lowering |
 | Open port graphs, composition by wire, inverse | Implemented |
-| CZ and CCZ | Direct pair cancellation during construction and composition |
+| CZ and CCZ | Direct pair cancellation during construction and composition; commuting interactions reordered by an explicit pass |
 | Contracts, named fragments, compact traversal such as `zipWith` | Planned |
 | Preparation, measurement, classical control | Deferred |
 | Arbitrary-rotation synthesis, resource analysis, Cirq export | Planned |
@@ -528,6 +556,9 @@ The test suite covers the following cases.
 - Long single-wire runs, graph composition and validation, and CNOT/Toffoli recipes.
 - Complete three-qubit matrices before and after construction and pair cancellation,
   including phases, parallel port connections, and newly exposed pairs.
+- Inverses of random graphs against composition and conjugate-transposed matrices.
+- The canonical-order pass: equal graphs for random commuting rearrangements of
+  one circuit, and complete four-qubit matrices before and after the pass.
 
 The exact oracle constructs matrices independently of runtime tables and
 normalisation, reusing only the generator's scalar arithmetic. A separate
@@ -542,6 +573,7 @@ the normal-form theorem.
 | `quantum_circuits/operators.py` | Central operator value, normalisation, construction, and lowering |
 | `quantum_circuits/clifford.py` | Supporting Clifford algebra |
 | `quantum_circuits/model.py` | Wires, graph values, and composition |
+| `quantum_circuits/passes.py` | Explicit graph passes |
 | `examples/basic.py` | Runnable examples |
 | `tests/` | Interface tests and independent exact/numerical matrix checks |
 | `tools/generate_clifford_tables.py` | Reproducible exact table generation |
