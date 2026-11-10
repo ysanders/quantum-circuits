@@ -2,7 +2,7 @@ import random
 import unittest
 from unittest.mock import patch
 
-from quantum_circuits import CCZ, CZ, H, Wire, S, T, cancel_pairs, gate, op, seq
+from quantum_circuits import CCZ, CZ, H, Wire, S, T, gate, op, seq
 from quantum_circuits.operators import _Accumulator
 from tests.reference import apply, leaves
 
@@ -112,7 +112,6 @@ class CancelPairsTests(unittest.TestCase):
             body = seq(*raw, wires=wires)
             cut = rng.randrange(len(raw) + 1)
             joined = seq(seq(*raw[:cut]), seq(*raw[cut:]), wires=wires)
-            self.assertIs(cancel_pairs(body), body)  # Compatibility for existing callers.
             reduced = tuple(leaves(body))
             composed = tuple(leaves(joined))
             for basis in range(8):

@@ -20,7 +20,7 @@ the operator `u` to wire `b`. The constructors `CZ(a, b)` and `CCZ(a, b, c)`
 name the wires that participate in each interaction.
 
 A Python function builds a circuit by passing these operations to `seq` in
-execution order. The result, a `Seq`, is an immutable directed graph with an
+execution order. The result, a `Seq`, is an immutable directed graph with a
 declared wire order. Each surviving CZ or CCZ gives one `Intersection` in
 its `vertices` tuple. A `WireSegment` connects two ports on the same wire and
 carries the combined `WireOp` for that stretch. A wire that passes through
@@ -171,7 +171,6 @@ During construction, wire factors stay in execution order. Removing a vertex
 reopens its incoming segments. Their factors can accumulate until another
 match needs to check identity or the builder freezes the result. This also
 applies to pairs exposed by composing two independently compiled blocks.
-`cancel_pairs(body)` returns its argument for compatibility with existing callers.
 
 The next example demonstrates cancellation across a composition boundary.
 Each block contains a CZ and a CCZ. At the join the CCZ pair cancels first,
@@ -379,11 +378,10 @@ Labels below use matrix order, with the rightmost factor acting first.
 | 5 | HSH | 20: HSH | 21: XHSH | 22: YHSH | 23: ZHSH |
 
 Frame is an integer in `range(24)`; phase is an integer reduced modulo eight.
-Booleans are rejected. There are 192 exact values. `rep`, `pauli`,
-`is_identity`, `@`, `inverse`, and `from_word` retain their existing meanings.
+Booleans are rejected. There are 192 exact values.
 `clifford(*parts)` accepts strings and Clifford values in execution order,
-using I/X/Y/Z/H/S. Submodule constants retain the Clifford type; top-level
-constants use the operator type. `op(c)` promotes a Clifford.
+using I/X/Y/Z/H/S. The constants in `quantum_circuits.clifford` are `Clif`
+values; the top-level constants are `WireOp` values. `op(c)` promotes a Clifford.
 
 Products, inverses, and constructors reuse the small Clifford pool. Generated
 tables include phase corrections, signed Pauli actions, and exact H/S words.
@@ -480,15 +478,6 @@ the normal-form theorem.
 | `quantum_circuits/operators.py` | Central operator value, normalisation, construction, and lowering |
 | `quantum_circuits/clifford.py` | Supporting Clifford algebra |
 | `quantum_circuits/model.py` | Wires, graph values, and composition |
-| `quantum_circuits/passes.py` | Compatibility entry point for explicit pair cancellation |
 | `examples/basic.py` | Runnable examples |
 | `tests/` | Interface tests and independent exact/numerical matrix checks |
 | `tools/generate_clifford_tables.py` | Reproducible exact table generation |
-
-### Migration from the earlier core
-
-In the original Clifford-only API, `Clif(c, q)` applied a Clifford to a
-named qubit. The current `Clif(frame, phase)` is the Clifford value itself.
-Given a Clifford `c`, write `Apply(op(c), q)` to act on wire `q`. Replace
-the original `TGate(q)` with `Apply(T, q)`. Use `clifford(...)` to build a
-Clifford from words and `op(...)` to construct a `WireOp`.

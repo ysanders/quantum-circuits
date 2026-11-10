@@ -23,6 +23,11 @@ class Wire:
         return f'Wire({self.name!r})'
 
 
+def _wire_key(wire: Wire) -> str:
+    """The order in which symmetric ports are stored."""
+    return wire.name
+
+
 def _require_wires(*wires: Wire) -> None:
     if not all(isinstance(q, Wire) for q in wires):
         raise TypeError('wires must be Wire values')
@@ -67,7 +72,7 @@ class CZ:
 
     def __post_init__(self) -> None:
         _require_wires(self.a, self.b)
-        a, b = sorted((self.a, self.b), key=lambda q: q.name)
+        a, b = sorted((self.a, self.b), key=_wire_key)
         object.__setattr__(self, 'a', a)
         object.__setattr__(self, 'b', b)
 
@@ -90,7 +95,7 @@ class CCZ:
 
     def __post_init__(self) -> None:
         _require_wires(self.a, self.b, self.c)
-        a, b, c = sorted((self.a, self.b, self.c), key=lambda q: q.name)
+        a, b, c = sorted((self.a, self.b, self.c), key=_wire_key)
         object.__setattr__(self, 'a', a)
         object.__setattr__(self, 'b', b)
         object.__setattr__(self, 'c', c)
@@ -143,7 +148,7 @@ class Intersection:
         wires = tuple(e.wire for e in self.inputs)
         _require_wires(*wires)
         # Both gates are symmetric. Permute entire ports, including their labels.
-        object.__setattr__(self, 'inputs', tuple(sorted(self.inputs, key=lambda e: e.wire.name)))
+        object.__setattr__(self, 'inputs', tuple(sorted(self.inputs, key=lambda e: _wire_key(e.wire))))
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,7 +161,7 @@ class Seq:
 
     def __post_init__(self) -> None:
         if not isinstance(self.wires, tuple):
-            raise TypeError('wires must be an ordered tuple of Qubits')
+            raise TypeError('wires must be an ordered tuple of Wire values')
         _require_wires(*self.wires)
         if not isinstance(self.vertices, tuple) or not isinstance(self.outputs, tuple):
             raise TypeError('vertices and outputs must be tuples')
