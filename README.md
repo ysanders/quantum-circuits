@@ -40,10 +40,11 @@ function again.
 | `Apply` | An operator applied to a named wire |
 | `CZ`, `CCZ` | Symmetric phase gates applied to two or three distinct named wires |
 | `Seq` | An open graph with ordered boundary wires, interaction vertices, and output edges |
+| `Builder` | A mutable circuit under construction; `freeze()` returns the `Seq` |
 | `Intersection` | One CZ or CCZ occurrence with a port for each participating wire |
 | `WireSegment` | A connection from a source port carrying a canonical single-qubit operator |
 
-These values are frozen, slotted dataclasses. Equality and hashing use their
+Apart from `Builder`, these values are frozen, slotted dataclasses. Equality and hashing use their
 stored fields. The canonical form of a `WireOp` makes equality
 an exact test of the one-wire operation, including global phase. For a
 `Seq`, equality also depends on the stored boundary and traversal order.
@@ -184,6 +185,29 @@ a, b, c = map(Wire, 'abc')
 left = seq(CZ(a, b), CCZ(a, b, c))
 right = seq(CCZ(c, b, a), CZ(b, a))
 assert seq(left, right) == seq(wires=left.wires)
+```
+
+### Building incrementally
+
+`Builder(wires=None)` holds a circuit under construction. `add(*parts)`
+appends parts in execution order and returns the builder. `freeze()` returns
+the `Seq` built so far and leaves the builder usable.
+`seq(*parts, wires=w)` is `Builder(w).add(*parts).freeze()`.
+
+`add` costs time proportional to the part it appends. A loop of
+`acc = seq(acc, part)` walks the accumulated graph on every iteration.
+Use one `seq(*parts)` call or a `Builder` instead.
+
+```python
+from quantum_circuits import Builder, CZ, H, Wire, gate, seq
+
+wires = tuple(Wire(name) for name in "abcd")
+builder = Builder(wires)
+for control, target in zip(wires, wires[1:]):
+    builder.add(gate(H, target), CZ(control, target), gate(H, target))
+ladder = builder.freeze()
+assert len(ladder.vertices) == 3
+assert builder.add(ladder).freeze() == seq(ladder, ladder)
 ```
 
 ### Higher-order constructors

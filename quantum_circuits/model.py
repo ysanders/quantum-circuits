@@ -198,122 +198,155 @@ class Seq:
 Node: TypeAlias = Primitive | Seq
 
 
-def seq(*parts: Node, wires: Iterable[Wire] | None = None) -> Seq:
-    """Compose a block by wire name, reducing wire labels and direct CZ/CCZ pairs.
+class Builder:
+    """A circuit under construction: add() appends parts, freeze() returns the Seq.
 
-    Supply an ordered iterable of wires to fix the interface. Otherwise its order
-    follows first appearance, including the complete interfaces of nested Seqs.
+    add() costs time proportional to the part it appends. A loop of add()
+    calls is therefore linear, where a loop of seq(acc, part) calls walks the
+    accumulated graph on every iteration. seq(*parts) is one Builder.
     """
-    if isinstance(wires, (set, frozenset)):
-        raise TypeError('wires requires an ordered iterable such as a tuple or list')
-    boundary = None if wires is None else tuple(wires)
-    if boundary is not None:
-        _require_wires(*boundary)
-    if len(parts) == 1 and isinstance(parts[0], Seq) and boundary in (None, parts[0].wires):
-        return parts[0]
 
-    latest: dict[Wire, int | None] = dict.fromkeys(boundary or ())
-    vertices: dict[int, Intersection] = {}
-    next_index = 0
+    __slots__ = ('_boundary', '_latest', '_vertices', '_next', '_runs')
 
-    # A source port identifies one segment. Its factors can stay here even
-    # after a vertex closes it: erasing that vertex reopens the same segment.
-    runs: dict[tuple[Wire, int | None], list[WireOp]] = {}
+    def __init__(self, wires: Iterable[Wire] | None = None) -> None:
+        if isinstance(wires, (set, frozenset)):
+            raise TypeError('wires requires an ordered iterable such as a tuple or list')
+        self._boundary = None if wires is None else tuple(wires)
+        if self._boundary is not None:
+            _require_wires(*self._boundary)
+        # The current port on each wire; None is the input boundary.
+        self._latest: dict[Wire, int | None] = dict.fromkeys(self._boundary or ())
+        self._vertices: dict[int, Intersection] = {}
+        self._next = 0
+        # A source port identifies one segment. Its factors can stay here even
+        # after a vertex closes it: erasing that vertex reopens the same segment.
+        self._runs: dict[tuple[Wire, int | None], list[WireOp]] = {}
 
-    def add(wire: Wire, value: WireOp) -> None:
-        source = latest.setdefault(wire, None)
+    def add(self, *parts: Node) -> Builder:
+        """Append parts in execution order, joining wires by name."""
+        for part in parts:
+            if isinstance(part, Apply):
+                self._label(part.targ, part.op)
+            elif isinstance(part, CZ):
+                self._interact('CZ', (part.a, part.b))
+            elif isinstance(part, CCZ):
+                self._interact('CCZ', (part.a, part.b, part.c))
+            elif isinstance(part, Seq):
+                self._graph(part)
+            else:
+                raise TypeError('a circuit part must be a gate application or a Seq')
+        return self
+
+    def freeze(self) -> Seq:
+        """Return the circuit built so far. The builder remains usable."""
+        # Compact indices only once. Retain original records wherever the
+        # source port and the exact label still agree.
+        moved: dict[int, int] = {}
+
+        def finish(edge: WireSegment) -> WireSegment:
+            value = self._take(edge.wire, edge.source, edge.op)
+            source = moved.get(edge.source, edge.source) if edge.source is not None else None
+            if source == edge.source and value == edge.op:
+                return edge
+            return WireSegment(edge.wire, source, value)
+
+        result: list[Intersection] = []
+        for old, vertex in self._vertices.items():
+            if old != len(result):
+                moved[old] = len(result)
+            inputs = tuple(finish(e) for e in vertex.inputs)
+            result.append(vertex if inputs == vertex.inputs else Intersection(vertex.kind, inputs))
+        outputs = tuple(finish(WireSegment(wire, source)) for wire, source in self._latest.items())
+        body = Seq(tuple(self._latest), tuple(result), outputs)
+        self._resume(body)
+        return body
+
+    def _declare(self, wire: Wire) -> None:
+        if wire not in self._latest:
+            if self._boundary is not None:
+                raise ValueError('circuit uses a wire outside the declared interface')
+            self._latest[wire] = None
+
+    def _label(self, wire: Wire, value: WireOp) -> None:
+        self._declare(wire)
         if not value.is_identity:
-            runs.setdefault((wire, source), []).append(value)
+            self._runs.setdefault((wire, self._latest[wire]), []).append(value)
 
-    def take_label(
-        wire: Wire, source: int | None, suffix: WireOp = I,
-    ) -> WireOp:
-        factors = runs.pop((wire, source), None)
+    def _take(self, wire: Wire, source: int | None, suffix: WireOp = I) -> WireOp:
+        """Remove and return the product of a segment's factors, then suffix."""
+        factors = self._runs.pop((wire, source), None)
         if not factors:
             return suffix
         if not suffix.is_identity:
             factors.append(suffix)
         return factors[0] if len(factors) == 1 else op(*factors)
 
-    def is_clear(wire: Wire) -> bool:
+    def _is_clear(self, wire: Wire) -> bool:
         # Only a candidate pair needs its intervening product now. Cache a
         # nonidentity result for the surviving edge.
-        label = take_label(wire, latest[wire])
+        label = self._take(wire, self._latest[wire])
         if label.is_identity:
             return True
-        add(wire, label)
+        self._label(wire, label)
         return False
 
-    def interact(kind: Kind, operands: tuple[Wire, ...]) -> None:
-        nonlocal next_index
-        source = latest.get(operands[0])
+    def _interact(self, kind: Kind, operands: tuple[Wire, ...]) -> None:
+        for wire in operands:
+            self._declare(wire)
+        latest, vertices = self._latest, self._vertices
+        source = latest[operands[0]]
         if (
             source is not None
             and vertices[source].kind == kind
-            and all(latest.get(w) == source for w in operands)
-            and all(is_clear(w) for w in operands)
+            and all(latest[w] == source for w in operands)
+            and all(self._is_clear(w) for w in operands)
         ):
+            # Erase the pair and reopen the earlier vertex's incoming segments.
             for edge in vertices.pop(source).inputs:
                 latest[edge.wire] = edge.source
-                add(edge.wire, edge.op)
+                self._label(edge.wire, edge.op)
             return
-
-        inputs = tuple(WireSegment(w, latest.get(w)) for w in operands)
-        vertices[next_index] = Intersection(kind, inputs)
+        vertices[self._next] = Intersection(kind, tuple(WireSegment(w, latest[w]) for w in operands))
         for wire in operands:
-            latest[wire] = next_index
-        next_index += 1
+            latest[wire] = self._next
+        self._next += 1
 
-    def append_graph(body: Seq) -> None:
-        nonlocal next_index
+    def _graph(self, body: Seq) -> None:
         for wire in body.wires:
-            latest.setdefault(wire, None)
-        if next_index == 0 and not runs:
-            # The first reduced body can share its vertices. Its stored input
-            # labels rejoin the pending factors if a later join erases a vertex.
-            vertices.update(enumerate(body.vertices))
-            next_index = len(body.vertices)
-            for edge in body.outputs:
-                latest[edge.wire] = edge.source
-        else:
-            for vertex in body.vertices:
-                for edge in vertex.inputs:
-                    add(edge.wire, edge.op)
-                interact(vertex.kind, tuple(e.wire for e in vertex.inputs))
+            self._declare(wire)
+        if self._next == 0 and not self._runs:
+            self._resume(body, declared=True)
+            return
+        for vertex in body.vertices:
+            for edge in vertex.inputs:
+                self._label(edge.wire, edge.op)
+            self._interact(vertex.kind, tuple(e.wire for e in vertex.inputs))
         for edge in body.outputs:
-            add(edge.wire, edge.op)
+            self._label(edge.wire, edge.op)
 
-    for part in parts:
-        if isinstance(part, Apply):
-            add(part.targ, part.op)
-        elif isinstance(part, CZ):
-            interact('CZ', (part.a, part.b))
-        elif isinstance(part, CCZ):
-            interact('CCZ', (part.a, part.b, part.c))
-        elif isinstance(part, Seq):
-            append_graph(part)
-        else:
-            raise TypeError('seq() accepts gate applications and Seq values')
+    def _resume(self, body: Seq, declared: bool = False) -> None:
+        """Continue from a reduced graph, sharing its vertex records.
 
-    if boundary is not None and len(boundary) != len(latest):
-        raise ValueError('circuit uses a wire outside the declared interface')
+        Its stored input labels rejoin the pending factors if a later join
+        erases a vertex.
+        """
+        if not declared:
+            self._latest = dict.fromkeys(body.wires)
+            self._runs = {}
+        self._vertices = dict(enumerate(body.vertices))
+        self._next = len(body.vertices)
+        for edge in body.outputs:
+            self._latest[edge.wire] = edge.source
+            self._label(edge.wire, edge.op)
 
-    # Compact indices only once. Retain original records wherever the source
-    # port and the exact label still agree.
-    moved: dict[int, int] = {}
 
-    def finish_edge(edge: WireSegment) -> WireSegment:
-        value = take_label(edge.wire, edge.source, edge.op)
-        source = moved.get(edge.source, edge.source) if edge.source is not None else None
-        if source == edge.source and value == edge.op:
-            return edge
-        return WireSegment(edge.wire, source, value)
+def seq(*parts: Node, wires: Iterable[Wire] | None = None) -> Seq:
+    """Compose a block by wire name, reducing wire labels and direct CZ/CCZ pairs.
 
-    result: list[Intersection] = []
-    for old, vertex in vertices.items():
-        if old != len(result):
-            moved[old] = len(result)
-        inputs = tuple(finish_edge(e) for e in vertex.inputs)
-        result.append(vertex if inputs == vertex.inputs else Intersection(vertex.kind, inputs))
-    outputs = tuple(finish_edge(WireSegment(wire, source)) for wire, source in latest.items())
-    return Seq(tuple(latest), tuple(result), outputs)
+    Supply an ordered iterable of wires to fix the interface. Otherwise its order
+    follows first appearance, including the complete interfaces of nested Seqs.
+    """
+    builder = Builder(wires)
+    if len(parts) == 1 and isinstance(parts[0], Seq) and builder._boundary in (None, parts[0].wires):
+        return parts[0]
+    return builder.add(*parts).freeze()
