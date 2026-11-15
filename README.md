@@ -10,6 +10,7 @@ operators, CZ, and CCZ.
 [Circuit graphs](#circuit-graphs) ·
 [Single-qubit operators](#single-qubit-operators) ·
 [Supporting Clifford algebra](#supporting-clifford-algebra) ·
+[Arithmetic experiments](#arithmetic-experiments) ·
 [Design and compilation](#design-and-compilation) ·
 [Running and verification](#running-and-verification) ·
 [Project layout](#project-layout)
@@ -391,6 +392,56 @@ Products, inverses, and constructors reuse the small Clifford pool. Generated
 tables include phase corrections, signed Pauli actions, and exact H/S words.
 The generator uses rational Q(sqrt(2), i) arithmetic; runtime only imports data.
 
+## Arithmetic experiments
+
+The first arithmetic recipe is `cuccaro_add` in
+`quantum_circuits.arithmetic`. Registers are ordinary ordered sequences of
+`Wire` values, with the least-significant bit first. The caller supplies every
+wire, including the carry and optional overflow output.
+
+For two n-bit registers, the recipe implements
+
+```text
+(A, B, c, z) -> (A, (A + B + c) mod 2**n, c, z XOR floor((A + B + c) / 2**n))
+```
+
+Omit `overflow` for modular addition. The input carry is restored. With carry
+initially zero this is ordinary addition; both carry values work, including
+in superposition. An overflow output initially zero records the outgoing
+carry. The recipe itself performs no preparation or measurement.
+
+This example demonstrates constructing an adder with named registers and
+inspecting the resulting interaction graph. It constructs a circuit; it does
+not execute an addition.
+
+```python
+from quantum_circuits import Wire
+from quantum_circuits.arithmetic import cuccaro_add
+
+a = tuple(Wire(f"a{i}") for i in range(4))
+b = tuple(Wire(f"b{i}") for i in range(4))
+carry, overflow = Wire("carry"), Wire("overflow")
+adder = cuccaro_add(a, b, carry, overflow=overflow)
+
+assert adder.wires == (*a, *b, carry, overflow)
+assert sum(v.kind == "CCZ" for v in adder.vertices) == 8
+```
+
+The module also exposes `cnot`, `toffoli`, `maj`, and `uma` as ordinary Python
+functions returning `Seq` values. `maj` writes the next carry into its first
+operand. The backward `uma` sweep restores the carries and writes the sum
+bits. The construction follows the basic ripple in section 2 of
+[Cuccaro et al.](https://arxiv.org/abs/quant-ph/0410184).
+It materialises an O(n)-size graph. Compact repeated calls remain future work.
+
+The numerical routines of
+[Häner, Roetteler, and Svore (2018)](https://arxiv.org/abs/1805.12445)
+are a next target. Their piecewise polynomial evaluator uses Horner steps;
+their inverse square root uses Newton iteration. Our Cuccaro recipe supplies
+an initial arithmetic building block. Their resource estimates use different
+adders, so those counts do not transfer directly. Multiplication, fixed-point
+formats, and the function evaluators are still to be implemented.
+
 ## Design and compilation
 
 I use ordinary Python functions to express algorithmic choices and a single
@@ -410,6 +461,7 @@ See [Selinger, Theorem 3.12](https://www.mscs.dal.ca/~selinger/papers/graphical.
 | Exact Clifford and canonical single-qubit Clifford+T algebra | Implemented, including composition, inversion, integer powers, and exact lowering |
 | Open port graphs and composition by wire | Implemented |
 | CZ and CCZ | Direct pair cancellation during construction and composition |
+| Reversible arithmetic | Basic Cuccaro addition, including incoming carry and optional overflow |
 | Contracts, named fragments, compact traversal such as `zipWith` | Planned |
 | Preparation, measurement, classical control | Deferred |
 | Arbitrary-rotation synthesis, resource analysis, Cirq export | Planned |
@@ -444,6 +496,7 @@ beyond the standard library. From the project root:
 
 ```sh
 python3.14 -m examples.basic
+python3.14 -m examples.arithmetic
 python3.14 -m unittest discover -v
 python3.14 tools/generate_clifford_tables.py --check
 ```
@@ -468,6 +521,8 @@ The test suite covers the following cases.
 - Long single-wire runs, graph composition and validation, and CNOT/Toffoli recipes.
 - Complete three-qubit matrices before and after construction and pair cancellation,
   including phases, parallel port connections, and newly exposed pairs.
+- MAJ/UMA and every basis input to one-, two-, and three-bit adders, including
+  carry restoration, overflow, and phases.
 
 The exact oracle constructs matrices independently of runtime tables and
 normalisation, reusing only the generator's scalar arithmetic. A separate
@@ -482,8 +537,10 @@ the normal-form theorem.
 | `quantum_circuits/operators.py` | Central operator value, normalisation, construction, and lowering |
 | `quantum_circuits/clifford.py` | Supporting Clifford algebra |
 | `quantum_circuits/model.py` | Wires, graph values, and composition |
+| `quantum_circuits/arithmetic.py` | CNOT, Toffoli, MAJ/UMA, and Cuccaro addition recipes |
 | `quantum_circuits/passes.py` | Compatibility entry point for explicit pair cancellation |
 | `examples/basic.py` | Runnable examples |
+| `examples/arithmetic.py` | Construct and inspect adders with and without overflow |
 | `tests/` | Interface tests and independent exact/numerical matrix checks |
 | `tools/generate_clifford_tables.py` | Reproducible exact table generation |
 

@@ -3,23 +3,16 @@
 from collections.abc import Callable
 
 from quantum_circuits import (
-    CCZ, CZ, Apply, H, I, Node, Wire, S, T,
+    Apply, H, I, Node, Wire, S, T,
     Seq, X, gate, op, seq,
 )
+from quantum_circuits.arithmetic import cnot, toffoli
 
 
 def in_h_basis(make_body: Callable[[Wire], Node], target: Wire, *,
                wires: tuple[Wire, ...] | None = None) -> Seq:
     """A higher-order constructor using only ordinary Python functions."""
     return seq(Apply(H, target), make_body(target), Apply(H, target), wires=wires)
-
-
-def cnot(control: Wire, target: Wire) -> Seq:
-    return in_h_basis(lambda q: CZ(control, q), target, wires=(control, target))
-
-
-def toffoli(a: Wire, b: Wire, target: Wire) -> Seq:
-    return in_h_basis(lambda q: CCZ(a, b, q), target, wires=(a, b, target))
 
 
 def main() -> None:
@@ -43,6 +36,7 @@ def main() -> None:
     print('Exact H/S/T decomposition:', lowered)
     print('Minimal T-count:', value.t_count)
 
+    print('T in the H basis:', in_h_basis(lambda q: Apply(T, q), t))
     print('CNOT recipe:', cnot(a, t))
     circuit = toffoli(a, b, t)
     print('Toffoli recipe:', circuit)
