@@ -1,5 +1,9 @@
 # Quantum circuits
 
+This codebase is written entirely by me and entirely for me.
+
+Use it if you like it.
+
 This package is a place to develop quantum algorithms, compare implementations
 of their subroutines, and inspect the circuits they produce. Its direction is a
 hierarchical circuit representation built from open directed port multigraphs:
@@ -9,10 +13,11 @@ an implementation.
 
 **The architecture below is the agreed direction for a rewrite.** The current
 prototype still uses `Seq`, `Intersection`, and primitive CZ and CCZ gates.
-It implements exact Clifford+T algebra, graph composition, direct pair
-cancellation, and a Cuccaro adder. Hierarchical blocks, equivalence classes,
-preparation, and measurement are not implemented yet. The
-[current API](#current-api) section describes what runs today.
+It implements exact Clifford+T algebra, incremental graph construction,
+circuit-level scalar phase, composition, inversion, direct pair cancellation,
+an explicit pass for commuting interactions, and a Cuccaro adder. Hierarchical
+blocks, equivalence classes, preparation, and measurement are not implemented
+yet. The [current API](#current-api) section describes what runs today.
 
 [Foundation](#foundation) · [Hierarchy and equivalence](#hierarchy-and-equivalence) ·
 [Regions and incidence](#regions-and-incidence) ·
@@ -47,9 +52,12 @@ single-qubit operators. Blocks may have any interface arity. Preparation,
 measurement, and classical operations will have their own vertex forms; the
 binary restriction applies to the elementary unitary interaction.
 
-Single-qubit labels retain exact scalar phase. An uninterrupted quantum edge
-can carry the canonical product of all its one-qubit processing. A block
-boundary remains visible until an explicit transformation removes it.
+Single-qubit operators retain exact scalar phase. A circuit can collect those
+scalar factors into one explicit circuit phase, as the current implementation
+does; that phase remains part of its exact semantics. An uninterrupted quantum
+edge can carry the canonical product of its one-qubit processing, with its
+scalar factor accounted for separately. A block boundary remains visible
+until an explicit transformation removes it.
 
 Connections identify source ports explicitly. Wire names help authors write
 circuits, but internal names and storage indices do not define circuit meaning.
@@ -212,9 +220,9 @@ responsibilities, not an already available API.
 1. **Graph, builder, and hierarchical CCZ.** Preserve the exact `Clif` and
    `WireOp` algebra. Introduce explicit ports, separate typed boundaries,
    binary `PhaseInteraction` vertices, and opaque block occurrences.
-   Supply CCZ with a verified binary reference body. Use a small mutable
-   builder that freezes an immutable result. Keep the arithmetic recipes
-   working and check expanded circuits with independent, phase-sensitive
+   Supply CCZ with a verified binary reference body. Adapt the existing
+   mutable builder to freeze the new immutable graph values. Keep the arithmetic
+   recipes working and check expanded circuits with independent, phase-sensitive
    semantics.
 2. **Regions and known equivalences.** Implement boundary-aware extraction,
    substitution, expansion, and fresh instantiation. Add structural comparison
@@ -284,6 +292,8 @@ assert word.count("T") == u.t_count
 | `u ** n` | Integer power, including zero and negative powers |
 | `u.t_count` | Minimal T-count for this isolated exact operator |
 | `u.is_clifford`, `u.is_identity` | Exact predicates, including phase |
+| `u.phase` | The exponent of the scalar factor in the canonical form, modulo eight |
+| `u.unphased()` | The operator divided by `exp(i*pi/4)**u.phase` |
 | `u.iter_gates()` | H/S/T word in execution order, with exactly `t_count` T gates |
 | Equality and hashing | Exact equality of canonical fields |
 
@@ -307,7 +317,9 @@ have type `Clif`, unlike the top-level `WireOp` constants.
 `Wire(name)` identifies a qubit by name; equal names mean the same wire.
 `Apply(u, q)` binds a `WireOp` to a wire, and `gate(word, q)` also
 accepts an operator word. `CZ(a, b)` and `CCZ(a, b, c)` require distinct
-wires and store their symmetric operands in name order.
+wires and store their symmetric operands in natural name order. Runs of ASCII
+digits compare as integers, so q2 precedes q10; the name itself breaks ties
+such as q2 and q02.
 
 ```python
 from quantum_circuits import Apply, CCZ, CZ, H, Wire, WireSegment, gate, op, seq
@@ -330,7 +342,7 @@ The two H gates above share an uninterrupted segment on c, so their product
 is identity. The CCZ pair in the final composition cancels, exposing a CZ pair
 which also cancels.
 
-`seq(*parts, wires=None)` accepts applications, CZ, CCZ, and existing
+`seq(*parts, wires=None, phase=0)` accepts applications, CZ, CCZ, and existing
 `Seq` values in execution order. An explicit `wires=` fixes the entire
 ordered interface, including idle wires. Otherwise, first appearance determines
 the order. Nested graphs are flattened and compose by wire name.
@@ -338,26 +350,117 @@ the order. Nested graphs are flattened and compose by wire name.
 
 | Current value | Stored structure |
 | --- | --- |
-| `Seq(wires, vertices, outputs)` | One ordered interface used for both input and output, a topological vertex tuple, and output edges |
+| `Seq(wires, vertices, outputs, phase=0)` | One ordered interface used for both input and output, a topological vertex tuple, output edges, and a scalar phase modulo eight |
+| `Builder(wires=None, phase=0)` | A mutable circuit under construction; `freeze()` returns an immutable `Seq` |
 | `Intersection(kind, inputs)` | A CZ or CCZ occurrence with two or three incoming edges and corresponding outgoing ports |
 | `WireSegment(wire, source=None, op=I)` | An edge labelled by a `WireOp`; source is a vertex index, or `None` for the input boundary |
 
 The destination stores each edge. The source index and wire identify its source
-port. Labels U followed by V compose as `V @ U`. Graph construction checks
-that each edge uses the current port on its wire.
+port. Labels U followed by V compose as `V @ U`, with the product's scalar
+factor collected in `Seq.phase`. Graph construction checks that each edge uses
+the current port on its wire. Apart from `Builder`, the values above are frozen,
+slotted dataclasses.
 
-Current reduction cancels equal interactions only when directly connected on
-all participating wires through exact identity labels. It does not implement
-general diagonal commutation. A scalar phase or a T label blocks this direct
-match. Raw `Seq` construction rejects such immediately cancellable pairs;
-this coupling between validity and reduction will change in the rewrite.
-`cancel_pairs(body)` is currently a compatibility function returning body.
+Construction cancels equal interactions only when directly connected on all
+participating wires through exact identity labels. A T label blocks this direct
+match. A scalar phase does not, because it is collected on the circuit rather
+than stored on an edge. Raw `Seq` construction rejects such immediately
+cancellable pairs; this coupling between validity and reduction will change
+in the rewrite. The former `cancel_pairs` compatibility function has been
+removed; `canonical_order` is the explicit pass described below.
 
 Current `Seq` equality and hashing compare stored fields, including wire
 names and traversal order. They are neither graph-isomorphism tests nor
 semantic-equivalence tests. Even regrouping construction can change the stored
-ordering of disjoint vertices. Prefer batching parts in one `seq` call over
-repeatedly rebuilding a growing immutable graph.
+ordering of disjoint vertices.
+
+### Scalar phase
+
+A `Seq` denotes `omega**phase` times its graph, with
+`omega = exp(i*pi/4)`. The builder collects the canonical scalar factor of
+each operator and adds the initial `phase` argument. Labels stored inside a
+`Seq` have `op.phase == 0`; raw construction rejects labels that do not.
+Scalar phase is preserved even on a circuit with no wires.
+
+```python
+from quantum_circuits import CZ, Wire, gate, op, seq
+
+a, b = Wire("a"), Wire("b")
+omega = op(phase=1)
+on_a = seq(gate(omega, a), wires=(a, b))
+on_b = seq(gate(omega, b), wires=(a, b))
+assert on_a == on_b == seq(wires=(a, b), phase=1)
+assert seq(CZ(a, b), gate(omega, a), CZ(a, b)) == on_a
+assert seq(on_a, on_b).phase == 2
+```
+
+### Commuting interactions
+
+`canonical_order(body)` explicitly reorders commuting CZ and CCZ
+interactions and cancels pairs this exposes. It permits exchanges where the
+shared wires carry only identity labels between interactions, as well as
+exchanges of disjoint operations. `seq` itself keeps the written interaction
+order apart from direct pair cancellation.
+
+```python
+from quantum_circuits import CZ, Wire, canonical_order, seq
+
+a, b, c, d = map(Wire, "abcd")
+body = seq(CZ(a, b), CZ(b, c), CZ(a, b))
+assert len(body.vertices) == 3
+assert canonical_order(body) == seq(CZ(b, c), wires=(a, b, c))
+
+wires = (a, b, c, d)
+first = seq(CZ(a, b), CZ(c, d), wires=wires)
+second = seq(CZ(c, d), CZ(a, b), wires=wires)
+assert first != second
+assert canonical_order(first) == canonical_order(second) == first
+```
+
+Nonidentity labels act as barriers. Even a diagonal T label fixes the order
+in this pass, although it commutes with CZ and CCZ as a matrix: the pass does
+not move labels. Its normalization covers these supported exchanges and pair
+cancellations; it does not decide general circuit equivalence or canonicalize
+graphs under arbitrary internal renaming.
+
+### Inverse
+
+`body.inverse()` returns the exact adjoint on the same ordered interface.
+It reverses the vertices, inverts the edge operators, and accounts for the
+negated circuit phase and any scalar factors produced by inversion.
+
+```python
+from quantum_circuits import CCZ, CZ, H, T, Wire, gate, seq
+
+a, b, c = map(Wire, "abc")
+compute = seq(gate(H, c), CCZ(a, b, c), gate(H, c), gate(T, a), CZ(a, b))
+assert seq(compute, compute.inverse()) == seq(wires=compute.wires)
+assert compute.inverse().inverse() == compute
+```
+
+### Building incrementally
+
+`Builder(wires=None, phase=0)` accumulates a circuit.
+`add(*parts)` appends parts in execution order and returns the builder.
+`freeze()` returns the immutable `Seq` built so far and leaves the builder
+usable. `seq` uses the same builder.
+
+Use one `seq(*parts)` call or a `Builder` for a long construction. Repeated
+`acc = seq(acc, part)` walks the accumulated graph on every iteration.
+Repeatedly freezing a growing builder also materializes the graph; freeze
+when the immutable result is needed.
+
+```python
+from quantum_circuits import Builder, CZ, H, Wire, gate, seq
+
+wires = tuple(Wire(name) for name in "abcd")
+builder = Builder(wires)
+for control, target in zip(wires, wires[1:]):
+    builder.add(gate(H, target), CZ(control, target), gate(H, target))
+ladder = builder.freeze()
+assert len(ladder.vertices) == 3
+assert builder.add(ladder).freeze() == seq(ladder, ladder)
+```
 
 ### Arithmetic
 
@@ -427,7 +530,8 @@ python3 -m pip install -e .
 
 The tests include exhaustive Clifford products, bounded enumeration of exact
 single-qubit normal forms, exact and numerical matrix comparisons, graph
-validation and pair cancellation, and small adders with carry restoration,
+validation and pair cancellation, reusable builders, circuit inversion,
+commuting-interaction normalization, and small adders with carry restoration,
 overflow, and phase checks. The exact matrix oracle is independent of runtime
 tables and normalization, while sharing the generator's scalar arithmetic.
 A separate numerical oracle uses conventional complex matrices.
@@ -444,9 +548,9 @@ coherences and classical outcomes.
 | `quantum_circuits/operators.py` | Exact single-qubit values, normalization, and lowering |
 | `quantum_circuits/clifford.py` | Exact Clifford algebra |
 | `quantum_circuits/_clifford_tables.py` | Generated finite tables |
-| `quantum_circuits/model.py` | Current wires, graph values, composition, and direct cancellation |
+| `quantum_circuits/model.py` | Current wires, graph values, builder, composition, inversion, and direct cancellation |
 | `quantum_circuits/arithmetic.py` | Reversible arithmetic recipes |
-| `quantum_circuits/passes.py` | Compatibility entry point for pair cancellation |
+| `quantum_circuits/passes.py` | Explicit graph passes, currently `canonical_order` |
 | `examples/` | Runnable construction examples |
 | `tests/` | Interface tests and independent semantic checks |
 | `tools/generate_clifford_tables.py` | Exact, reproducible table generation |

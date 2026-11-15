@@ -67,6 +67,8 @@ These rules describe the target of the rewrite. The present code still uses
   arity or retain CCZ as a second elementary interaction in the new core.
 - Exact single-qubit `WireOp` values label quantum edges. Preserve scalar
   phase and the distinction between execution order and matrix order.
+  The current graph collects scalar factors in `Seq.phase` and stores labels
+  with `op.phase == 0`; preserve the full exact operator when moving phase.
 - Blocks may have arbitrary arity. CCZ denotes an exact three-wire operation
   with known implementations, including a verified binary reference body.
   Author-facing CZ and CCZ constructors can remain convenient.
@@ -193,6 +195,9 @@ including correlations with an external reference where relevant.
 
 Keep current limitations visible: `Seq` equality is presently stored-field
 equality; `seq` eagerly flattens and cancels direct CZ/CCZ pairs;
-`cancel_pairs` is presently a compatibility no-op. Update these statements
-as implementation milestones land. Do not document planned names as imports
+`canonical_order` explicitly reorders interactions separated only by identity
+labels and cancels exposed pairs. It does not move nonidentity labels or decide
+general semantic equivalence. `cancel_pairs` has been removed. `Builder`,
+`Seq.phase`, and `Seq.inverse()` are implemented. Update these statements as
+implementation milestones land. Do not document planned names as imports
 until they exist.

@@ -74,6 +74,12 @@ def leaves(body):
         yield Apply(edge.op, edge.wire)
 
 
+def evaluate(body, wires, input_index):
+    """One column of a graph's matrix, including its scalar phase."""
+    column = apply(tuple(leaves(body)), wires, input_index)
+    return [OMEGA ** body.phase * v for v in column]
+
+
 def apply(operations, wires, input_index):
     """Apply a raw list of primitives to a basis vector, retaining phase."""
     positions = {q: i for i, q in enumerate(wires)}

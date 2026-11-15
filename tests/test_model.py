@@ -7,7 +7,7 @@ from quantum_circuits import (
     CCZ, CZ, WireSegment, Intersection, Apply, H, I, Wire, S, Seq, Clif,
     T, X, Y, Z, op, gate, seq,
 )
-from tests.reference import apply, leaves
+from tests.reference import apply, evaluate
 
 
 class ModelTests(unittest.TestCase):
@@ -56,6 +56,22 @@ class ModelTests(unittest.TestCase):
             self.assertEqual(hash(CCZ(*wires)), hash(expected))
         self.assertEqual(expected.qubits, frozenset((self.a, self.b, self.t)))
         self.assertEqual(gate(T, self.t).qubits, frozenset((self.t,)))
+
+    def test_symmetric_ports_use_natural_name_order(self):
+        ordered = ['', '9', '10', 'a', 'a9', 'a9b', 'a10', 'a10a', 'b', 'q02', 'q2', 'q10', 'q٣']
+        for i, low in enumerate(ordered):
+            for high in ordered[i + 1:]:
+                first, second = Wire(low), Wire(high)
+                with self.subTest(low=low, high=high):
+                    for cz in (CZ(first, second), CZ(second, first)):
+                        self.assertEqual((cz.a, cz.b), (first, second))
+                    vertex = Intersection('CZ', (WireSegment(second), WireSegment(first)))
+                    self.assertEqual(tuple(e.wire for e in vertex.inputs), (first, second))
+        register = [Wire(f'r{i}') for i in range(12)]
+        ccz = CCZ(register[11], register[9], register[10])
+        self.assertEqual((ccz.a, ccz.b, ccz.c), tuple(register[9:12]))
+        self.assertEqual(seq(*(CZ(b, a) for a, b in zip(register, register[1:]))).wires,
+                         tuple(register))
 
     def test_invalid_gate_operands(self):
         for make in (
@@ -107,8 +123,8 @@ class ModelTests(unittest.TestCase):
         self.assertEqual(seq(*(gate(x, q) for x in 'HTH')), seq(gate('HTH', q)))
         self.assertEqual(seq(*(gate(T, q) for _ in range(8))), seq(wires=(q,)))
         scalar = op(phase=1)
-        self.assertEqual(seq(*(gate(x, q) for x in (S, H, S, H, S, H))).outputs,
-                         (WireSegment(q, None, scalar),))
+        self.assertEqual(seq(*(gate(x, q) for x in (S, H, S, H, S, H))),
+                         seq(wires=(q,), phase=1))
         self.assertEqual(seq(gate(scalar, q), gate(op(phase=7), q)), seq(wires=(q,)))
         with self.assertRaises(TypeError):
             gate(Clif(0), q)
@@ -233,10 +249,9 @@ class ModelTests(unittest.TestCase):
             self.assertEqual(seq(result), result)
             cut = rng.randrange(len(raw) + 1)
             self.assertEqual(seq(seq(*raw[:cut]), seq(*raw[cut:])), result)
-            flat = tuple(leaves(result))
             for basis in range(8):
                 expected = apply(raw, wires, basis)
-                actual = apply(flat, wires, basis)
+                actual = evaluate(result, wires, basis)
                 self.assertLess(max(abs(a - b) for a, b in zip(actual, expected)), 1e-12)
 
     def test_cnot_and_toffoli_recipes(self):
@@ -249,13 +264,13 @@ class ModelTests(unittest.TestCase):
                 target = basis ^ (1 << len(controls)) if basis & mask == mask else basis
                 expected = [0j] * (1 << len(wires))
                 expected[target] = 1
-                actual = apply(tuple(leaves(circuit)), wires, basis)
+                actual = evaluate(circuit, wires, basis)
                 self.assertLess(max(abs(a - b) for a, b in zip(actual, expected)), 1e-12)
 
     def test_t_adjoint_recipe(self):
         circuit = seq(Apply(S.inverse(), self.t), gate(T, self.t))
         from tests.reference import OMEGA
-        self.assertAlmostEqual(apply(tuple(leaves(circuit)), (self.t,), 1)[1], OMEGA.conjugate())
+        self.assertAlmostEqual(evaluate(circuit, (self.t,), 1)[1], OMEGA.conjugate())
 
 
 if __name__ == '__main__':
