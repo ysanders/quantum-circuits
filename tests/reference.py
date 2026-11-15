@@ -1,9 +1,7 @@
-"""Independent complex-matrix oracle; never uses the multiplication tables."""
+"""Independent single-qubit complex matrices; never use the runtime tables."""
 
 import cmath
 import math
-
-from quantum_circuits import CCZ, CZ, Apply
 
 IDENTITY = (1, 0, 0, 1)
 PAULI_X = (0, 1, 1, 0)
@@ -61,44 +59,3 @@ def word_matrix(word):
         if not letter.isspace():
             result = mm(NAMED[letter], result)
     return result
-
-
-def leaves(body):
-    """Interpret graph labels on named wires for the independent matrix oracle."""
-    for vertex in body.vertices:
-        for edge in vertex.inputs:
-            yield Apply(edge.op, edge.wire)
-        interaction = CZ if vertex.kind == 'CZ' else CCZ
-        yield interaction(*(edge.wire for edge in vertex.inputs))
-    for edge in body.outputs:
-        yield Apply(edge.op, edge.wire)
-
-
-def evaluate(body, wires, input_index):
-    """One column of a graph's matrix, including its scalar phase."""
-    column = apply(tuple(leaves(body)), wires, input_index)
-    return [OMEGA ** body.phase * v for v in column]
-
-
-def apply(operations, wires, input_index):
-    """Apply a raw list of primitives to a basis vector, retaining phase."""
-    positions = {q: i for i, q in enumerate(wires)}
-    vector = [0j] * (1 << len(wires))
-    vector[input_index] = 1
-    for op in operations:
-        if isinstance(op, Apply):
-            u = operator_matrix(op.op)
-            mask = 1 << positions[op.targ]
-            out = vector.copy()
-            for j in range(len(vector)):
-                if not j & mask:
-                    v0, v1 = vector[j], vector[j | mask]
-                    out[j] = u[0] * v0 + u[1] * v1
-                    out[j | mask] = u[2] * v0 + u[3] * v1
-            vector = out
-        elif isinstance(op, (CZ, CCZ)):
-            mask = sum(1 << positions[q] for q in op.qubits)
-            vector = [-v if j & mask == mask else v for j, v in enumerate(vector)]
-        else:
-            raise TypeError(type(op))
-    return vector

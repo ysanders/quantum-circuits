@@ -1,15 +1,16 @@
 # Working on quantum-circuits
 
-Read [README.md](README.md) for the project direction, current API, and rewrite
-milestones. It deliberately distinguishes implemented behavior from the
-target architecture. Keep that distinction accurate.
+Read [README.md](README.md) for the current exact-algebra API and
+[DESIGN.md](DESIGN.md) for the future circuit architecture and rewrite
+milestones. Keep implemented behavior distinct from planned capabilities.
 
 ## Purpose and scope
 
-This is a small library for constructing, inspecting, comparing, and rewriting
-quantum circuits. The goal is hierarchical circuit representations using
-existing graph theory and compiler techniques, with exact quantum semantics.
-Keep the representation independent of a particular execution backend.
+The current library provides exact single-qubit Clifford+T algebra. The old
+graph prototype and its dependent arithmetic APIs have been removed. The goal
+remains hierarchical circuit representations using existing graph theory and
+compiler techniques, with exact quantum semantics. Keep the representation
+independent of a particular execution backend.
 
 Implement the requested increment. The roadmap is direction for future work,
 not an instruction to implement every layer in one task. Preserve unrelated
@@ -54,8 +55,8 @@ object-oriented rewrite of that file.
 
 ## Architectural foundation
 
-These rules describe the target of the rewrite. The present code still uses
-`Intersection` with primitive CZ and CCZ; update it in deliberate increments.
+These rules describe the target of the rewrite. No circuit graph is currently
+implemented; introduce it in deliberate increments on top of the exact algebra.
 
 - A circuit is a finite open directed acyclic port multigraph. Its meaning
   comes from ports, connections, labels, and boundaries, not vertex storage
@@ -67,8 +68,8 @@ These rules describe the target of the rewrite. The present code still uses
   arity or retain CCZ as a second elementary interaction in the new core.
 - Exact single-qubit `WireOp` values label quantum edges. Preserve scalar
   phase and the distinction between execution order and matrix order.
-  The current graph collects scalar factors in `Seq.phase` and stores labels
-  with `op.phase == 0`; preserve the full exact operator when moving phase.
+  If a graph collects scalar factors separately and stores labels with
+  `op.phase == 0`, preserve the full exact operator when moving phase.
 - Blocks may have arbitrary arity. CCZ denotes an exact three-wire operation
   with known implementations, including a verified binary reference body.
   Author-facing CZ and CCZ constructors can remain convenient.
@@ -172,10 +173,9 @@ python3 -m unittest discover -v
 python3 tools/generate_clifford_tables.py --check
 ```
 
-Run `python3 -m examples.basic` and `python3 -m examples.arithmetic` when
-changing their interfaces. For documentation changes, check links, examples,
-and consistency with the actual exports; do not invent tests that merely
-repeat the prose.
+Run `python3 -m examples.basic` when changing the algebra API or its example.
+For documentation changes, check links, examples, and consistency with the
+actual exports; do not invent tests that merely repeat the prose.
 
 `quantum_circuits/_clifford_tables.py` is generated. Change the generator
 rather than hand-editing table entries, regenerate with
@@ -193,11 +193,10 @@ Computational-basis density inputs alone cannot establish preservation of
 superposition. Test cleanup only against its stated input-subspace contract,
 including correlations with an external reference where relevant.
 
-Keep current limitations visible: `Seq` equality is presently stored-field
-equality; `seq` eagerly flattens and cancels direct CZ/CCZ pairs;
-`canonical_order` explicitly reorders interactions separated only by identity
-labels and cancels exposed pairs. It does not move nonidentity labels or decide
-general semantic equivalence. `cancel_pairs` has been removed. `Builder`,
-`Seq.phase`, and `Seq.inverse()` are implemented. Update these statements as
-implementation milestones land. Do not document planned names as imports
-until they exist.
+Keep the current scope visible: only `Clif`, `clifford`, `WireOp`, `op`, and
+the single-qubit gate constants are exported. Circuit construction, graph
+passes, arithmetic recipes, hierarchy, and processes are future work. The old
+graph implementation and its tests remain available in Git history; do not
+restore their normalization requirements as structural validity rules. Update
+these statements as implementation milestones land. Do not document planned
+names as imports until they exist.

@@ -1,1 +1,1 @@
-"""Tests for the circuit core."""
+"""Tests for the exact single-qubit algebra."""

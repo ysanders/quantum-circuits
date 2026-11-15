@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "quantum-circuits"
 version = "0.1.0"
-description = "Immutable circuits and canonical exact single-qubit Clifford+T operators"
+description = "Canonical exact single-qubit Clifford+T algebra"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = []

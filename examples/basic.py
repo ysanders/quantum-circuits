@@ -1,33 +1,20 @@
 """Run from the project root with: python3 -m examples.basic."""
 
-from collections.abc import Callable
-
-from quantum_circuits import (
-    Apply, H, I, Node, Wire, S, T,
-    Seq, X, gate, op, seq,
-)
-from quantum_circuits.arithmetic import cnot, toffoli
-
-
-def in_h_basis(make_body: Callable[[Wire], Node], target: Wire, *,
-               wires: tuple[Wire, ...] | None = None) -> Seq:
-    """A higher-order constructor using only ordinary Python functions."""
-    return seq(Apply(H, target), make_body(target), Apply(H, target), wires=wires)
+from quantum_circuits import H, I, S, T, clifford, op
 
 
 def main() -> None:
-    a, b, t = map(Wire, ('a', 'b', 't'))
     assert op('HH') == I
     assert op('H', 'S') == S @ H
+    assert op(clifford('HS')) == S @ H
+    assert op('TT') == S
+    assert T ** 8 == I
 
     print('H then S:', op('H', 'S'))
-    print('Two H gates:', seq(Apply(H, t), Apply(H, t)))
-    print('Same target:', seq(Apply(H, t), Apply(S, t)))
-    print('Different targets:', seq(Apply(H, t), Apply(S, a)))
-    print('Exposed fusion:', seq(Apply(X, t), Apply(H, a), Apply(H, a), Apply(X, t)))
-    print('Phase survives:', seq(gate(op(phase=1), t)))
+    print('Two H gates:', op('HH'))
+    print('T then T:', op(T, T))
+    print('T in the H basis:', H @ T @ H)
 
-    print('T then T:', seq(gate(T, t), gate(T, t)))
     value = op('HTSHT')
     assert value.inverse() @ value == I
     lowered = ''.join(value.iter_gates())
@@ -36,14 +23,11 @@ def main() -> None:
     print('Exact H/S/T decomposition:', lowered)
     print('Minimal T-count:', value.t_count)
 
-    print('T in the H basis:', in_h_basis(lambda q: Apply(T, q), t))
-    print('CNOT recipe:', cnot(a, t))
-    circuit = toffoli(a, b, t)
-    print('Toffoli recipe:', circuit)
-    print('Boundary wires:', circuit.wires)
-    twice = seq(circuit, circuit)
-    assert twice == seq(wires=circuit.wires)
-    print('Interactions after composing two Toffolis:', len(twice.vertices))
+    scalar = (H @ S) ** 3
+    assert scalar == op(phase=1)
+    assert not scalar.is_identity
+    assert scalar.unphased() == I
+    print('Scalar phase exponent:', scalar.phase)
 
 
 if __name__ == '__main__':
