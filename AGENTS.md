@@ -6,9 +6,10 @@ This file gives instructions for changing the repository.
 
 ## Purpose and scope
 
-Build a small Python library for the author's quantum algorithms and
-compiler. It must construct, inspect and manipulate circuits, sharing
-subcircuit definitions across uses on different registers.
+Build a small Python library that serves as a lowering target for the
+author's quantum compiler. It must construct, inspect and manipulate
+circuits, sharing subcircuit definitions across uses on different
+registers.
 
 The intended scope is:
 
@@ -19,10 +20,9 @@ The intended scope is:
   quantum registers. Python builds the circuit; the quantum computer
   performs the arithmetic.
 
-For quantum signal processing (QSP), accept phase angles computed by an
-external library. Physical layout, scheduling and machine resource
-estimation also belong to external tools. Their authors write adapters;
-backend requirements do not determine this library's mathematical model.
+Physical layout, scheduling and machine resource estimation belong to
+external tools. Their authors write adapters; backend requirements do not
+determine this library's mathematical model.
 
 ## Current state and next work
 
@@ -31,8 +31,9 @@ Only exact single-qubit Clifford+T algebra exists. The public exports are
 Circuit types, rotation synthesis and arithmetic constructors are planned.
 
 Next add single-qubit preparation and measurement, then wire intersections.
-The measurement output contract remains open. The old graph and arithmetic
-recipes in Git history are references, not requirements for the new model.
+Measurement destroys its wire; its classical output contract remains open.
+The old graph and arithmetic recipes in Git history are references, not
+requirements for the new model.
 
 ## Working rules
 
@@ -47,8 +48,9 @@ recipes in Git history are references, not requirements for the new model.
 - Preserve exact unitary phase, boundary order and measurement dependencies.
 - Separate graph validity from simplification. Do not restore the old
   normalisation requirements as validity rules.
-- Keep primitive preparation and measurement single-qubit, and the
-  elementary unitary intersection binary CZ. Larger operations have bodies.
+- Keep primitive preparation and measurement single-qubit and in the
+  computational basis, and the elementary unitary intersection binary CZ.
+  Larger operations have bodies.
 - Develop through concrete circuits. Permutation-invariant hashing must
   not delay construction.
 - Keep README.md about available code and DESIGN.md about rationale,

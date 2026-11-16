@@ -6,19 +6,19 @@ Use it if you like it.
 
 ## What this is
 
-A Python library for constructing and inspecting circuits for my quantum
-algorithms and compiler. The planned scope includes reusable circuits,
-rotation synthesis and coherent arithmetic on quantum registers.
-[DESIGN.md](DESIGN.md) explains the model and its uses, including
-polynomial evaluation and QSP circuits built from supplied phase angles.
+A Python library that serves as a lowering target for my quantum compiler.
+Circuits are built from shared definitions, so a consumer can walk one
+without expanding it and extract it to Qualtran, Cirq, Qiskit or another
+library. [DESIGN.md](DESIGN.md) explains the model and its uses, including
+polynomial evaluation.
 
-Today the package provides exact single-qubit Clifford+T algebra: composition,
-inverses, integer powers and H/S/T output with the minimum T count. Operators
-have unique stored forms, including phase, for exact equality and hashing.
+Today the package provides the exact single-qubit Clifford+T algebra that
+will label wire segments: composition, inverses, integer powers and H/S/T
+output with the minimum T count. Operators have unique stored forms,
+including phase, for exact equality and hashing.
 
 There is no circuit type, rotation synthesiser or arithmetic API yet. The
-next work is preparation and measurement, followed by wire intersections.
-The older circuit prototype remains in Git history.
+older circuit prototype remains in Git history.
 
 The package and its tests use only the Python standard library.
 

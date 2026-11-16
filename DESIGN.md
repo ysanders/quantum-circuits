@@ -2,10 +2,14 @@
 
 ## Purpose and scope
 
-This personal library supports the author's quantum algorithms and compiler.
-It will construct circuits from reusable subcircuits, inspect their structure
-and expand them into elementary operations. A subcircuit's definition is
-shared across uses on different registers.
+This library is a lowering target for the author's quantum compiler. Its
+job is to manage memory while a consumer iterates through a hierarchically
+constructed circuit. Each subcircuit definition is stored once and shared
+across uses on different registers. A consumer walks the circuit from the
+root definition and descends into any definition it does not recognise.
+An extractor for Qualtran, Cirq, Qiskit or another library stops at
+operations its target provides. The author need not choose a target
+library.
 
 The scope has three parts:
 
@@ -16,9 +20,6 @@ The scope has three parts:
 - **Coherent arithmetic:** construct additions, multiplications and
   polynomial evaluations on quantum registers. Python builds the circuit;
   the quantum computer performs the arithmetic.
-
-For quantum signal processing (QSP), an external library computes the phase
-angles. This library takes those angles as input and constructs the circuit.
 
 Only exact single-qubit Clifford+T algebra is implemented today; see
 [README.md](README.md). The circuit model and constructors below are planned.
@@ -60,14 +61,21 @@ rotation is approximate.
 
 ## Circuit representation
 
-Circuits describe logical operations and their dependencies. Physical
-placement, routing and scheduling belong to external consumers.
+A circuit means a time-ordered sequence of primitive operations on
+addressed qubits. The primitives are single-qubit Clifford gates, T, CZ on
+two distinct qubits, and single-qubit preparation and measurement in the
+computational basis. Physical placement, routing and scheduling belong to
+external consumers.
+
+The library stores a circuit under a programming discipline: wires that
+intersect pairwise. The discipline is a convenience; the sequence defines
+the circuit.
 
 ### One-qubit processing and intersections
 
-Each stretch of quantum wire carries a `WireOp`, the exact product of its
-Clifford+T gates. Combining consecutive one-qubit operations uses the
-existing algebra.
+Each segment of wire, between two intersections or between an intersection
+and a boundary port, carries a `WireOp`: the exact product of its Clifford+T
+gates. Combining consecutive one-qubit operations uses the existing algebra.
 
 An intersection joins wires at an operation. The only elementary unitary
 intersection is CZ on two distinct wires:
@@ -86,14 +94,11 @@ ports explicitly. A one-wire unitary circuit can be a labelled edge alone.
 
 ### Preparation and measurement
 
-Preparation creates a quantum wire. Measurement exposes a classical
-outcome. Both primitives act on one qubit; larger preparations and
-measurements are circuits built from them.
-
-The proposed first primitives are preparation of `|0>` and Z measurement.
+Preparation of `|0>` creates a wire. Z measurement destroys a wire and
+produces a classical outcome. Both act on one qubit in the computational
+basis; other preparations and measurements are circuits built from them.
 H after preparation produces `|+>`; H before Z measurement gives X
-measurement. Whether measurement consumes its qubit or retains a quantum
-output remains to be settled.
+measurement.
 
 Construction records a symbolic result and its dependencies without
 sampling an outcome. Preparation and measurement are separate from the
@@ -139,6 +144,11 @@ expansion remains available when a task needs elementary operations.
 
 ## Equality and hashing
 
+Identical definitions should have identical digests. Equivalent definitions
+need not, because canonicalisation trades against efficiency. Simple
+equivalent circuits should share a digest, as `op('TT')` and `S` already
+share a stored form. Complex equivalent circuits will likely not.
+
 Local ports allow reuse on different caller wires while preserving
 argument roles. A further goal is to give fragments the same canonical
 body and digest when they differ only by a permutation of qubit indices.
@@ -152,8 +162,6 @@ and a topological traversal does not provide canonical graph labelling.
 
 Different bodies can implement the same operation: moving T through CZ is
 one example. Recognising such identities is later transformation work.
-The initial representation may miss sharing opportunities while preserving
-correct circuit semantics.
 
 ## Example: CCZ
 
