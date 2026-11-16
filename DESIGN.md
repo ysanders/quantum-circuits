@@ -1,241 +1,177 @@
 # Circuit design
 
-This document says what the library is for and how it will represent a
-circuit. Two other documents go with it. [README.md](README.md) documents
-the code that exists today. [BACKEND.md](BACKEND.md) describes the tools
-that will consume the circuits.
+## Purpose and scope
 
-The library has no type for a circuit yet. The code so far handles operators
-on one qubit.
+This personal library supports the author's quantum algorithms and compiler.
+It will construct circuits from reusable subcircuits, inspect their structure
+and expand them into elementary operations. A subcircuit's definition is
+shared across uses on different registers.
 
-[Purpose](#purpose) · [Where the library sits](#where-the-library-sits) ·
-[Why a Merkle tree](#why-a-merkle-tree) ·
-[Why the work is done early](#why-the-work-is-done-early) ·
-[Foundation](#foundation) · [Example: CCZ](#example-ccz) ·
-[Open questions](#open-questions) · [Next step](#next-step)
+The scope has three parts:
 
-## Purpose
+- **Circuit construction:** operations, wiring, preparation, measurement
+  and shared subcircuit definitions.
+- **Rotation synthesis:** approximate a specified single-qubit rotation to
+  a requested accuracy using Clifford+T gates.
+- **Coherent arithmetic:** construct additions, multiplications and
+  polynomial evaluations on quantum registers. Python builds the circuit;
+  the quantum computer performs the arithmetic.
 
-I am building a compiler for quantum algorithms with my research group. A
-user writes an algorithm at a high level, and the compiler produces
-circuits. A second team estimates what a circuit costs to run on a
-fault-tolerant quantum computer. This document calls them the backend team.
+For quantum signal processing (QSP), an external library computes the phase
+angles. This library takes those angles as input and constructs the circuit.
 
-This library sits between the two. It is the Python layer that holds the
-compiler's circuits and passes them on. It is a prototype. It is also a
-reference implementation, which means a small and clear version that other
-code can be checked against.
+Only exact single-qubit Clifford+T algebra is implemented today; see
+[README.md](README.md). The circuit model and constructors below are planned.
 
-### The problem
+[Arithmetic example](#arithmetic-example) · [Circuit representation](#circuit-representation) ·
+[Shared subcircuits](#shared-subcircuits) · [Equality and hashing](#equality-and-hashing) ·
+[Example: CCZ](#example-ccz) · [External tools](#external-tools) ·
+[Implementation order](#implementation-order)
 
-In September 2026 a test run counted the gates in one circuit. It found 29
-billion. A tool that handles that circuit gate by gate does 29 billion
-pieces of work.
+## Arithmetic example
 
-Those gates came from 303 distinct subcircuits, each used many times. A tool
-that handles each subcircuit once does 303 pieces of work. This library
-stores a circuit so that tools can work that way.
+Grover–Rudolph state preparation motivates coherent polynomial evaluation:
+a rotation angle requires an arcsine calculation on a value in a quantum
+register. A truncated Taylor series gives one possible, inefficient
+approximation. This example illustrates the arithmetic required; it does
+not prescribe an approximation method.
 
-### What the library holds
-
-The library holds a circuit at one fixed stage of compilation. That stage
-follows the standard picture of fault-tolerant computing. In that picture a
-computation has three ingredients. They are Clifford gates on single qubits,
-routes between qubits, and magic states. A magic state is a specially
-prepared state. The computer uses one up to perform a gate that it cannot
-perform directly.
-
-The library has one kind of operation for each ingredient.
-
-- **A Clifford gate on one qubit.** These are the gates that can be built
-  from H and S. The library rewrites every run of them into one fixed form.
-  Two runs that make the same gate are stored as the same value.
-- **CZ.** This gate acts on two qubits. It multiplies a basis state by -1
-  when both qubits are 1. It needs a route between the two qubits. CZ treats
-  its two qubits alike. So a qubit needs a name, and it does not need a
-  position in a list.
-- **T.** This is the gate `diag(1, exp(i*pi/4))`. Each T uses up one magic
-  state.
-
-I assume the only magic states are T and CCZ. The representation does not
-need CCZ. These assumptions are a starting point for a fuller picture.
-
-The library does not work out what a circuit costs. The backend team does
-that, with knowledge of the machine. The library keeps enough information
-for a rough estimate.
-
-### How the library holds it
-
-The library stores a circuit as a tree of subcircuits. Each subcircuit is
-stored once and translated once, however many times it is used.
-[Why a Merkle tree](#why-a-merkle-tree) explains how.
-
-### What else the library is for
-
-The library is the base for three tools that I am writing myself. The first
-is gridsynth, which approximates a rotation by a sequence of H, S and T
-gates. The second computes the phase angles for quantum signal processing.
-The third is polynomial evaluation.
-
-## Where the library sits
+For `p(x) = a_0 + a_1*x + ... + a_d*x**d`, a constructor takes coefficients,
+register widths and numerical conventions. It builds arithmetic for an
+input register that may be in superposition. One possible interface is:
 
 ```text
-compiler  ->  this library  ->  backend team
-                            ->  Qualtran
+|x> |0> |0_work>  ->  |x> |p_tilde(x)> |0_work>
 ```
 
-Circuits arrive from the compiler. They leave in two directions.
+Here `p_tilde(x)` is the finite-precision result encoded as a bit string.
+The map must preserve coherence across x values and restore the working
+qubits. In the state-preparation example, the result controls a rotation,
+then its calculation can be uncomputed.
 
-### To the backend team
+Such constructions need explicit register order, reusable adders and
+multipliers, and working-qubit restoration. Their bodies must remain
+inspectable so a subroutine's implementation can be changed independently.
 
-The backend team estimates what a circuit costs on a machine built from
-surface-code patches. They decide where each logical qubit sits. They decide
-how operations are routed and when each one runs. They decide which factory
-supplies each magic state. They report the number of physical qubits and the
-run time. Those answers depend on the machine, and this library decides none
-of them.
+Polynomial approximation, finite-precision arithmetic and rotation synthesis
+have separate approximation errors. The gate algebra describes the chosen
+circuit exactly, including phase; agreement with the requested function or
+rotation is approximate.
 
-The library keeps its own representation. It offers the backend team a walk
-over a circuit. The walk lists the gates of a subcircuit in the order they
-run. It also marks each place where another subcircuit is used.
-[BACKEND.md](BACKEND.md) describes their tools and the walk.
+## Circuit representation
 
-### To Qualtran
+Circuits describe logical operations and their dependencies. Physical
+placement, routing and scheduling belong to external consumers.
 
-Qualtran is a Python library from Google for writing quantum algorithms and
-counting what they cost. I plan to write circuits out in Qualtran's format,
-for three reasons.
+### One-qubit processing and intersections
 
-- **Qualtran keeps a program as a hierarchy.** Its unit is called a bloq. A
-  bloq is made of smaller bloqs. Its
-  [call graph](https://qualtran.readthedocs.io/en/latest/resource_counting/call_graph.html)
-  lists each smaller bloq once, with the number of times it is used. One
-  subcircuit here becomes one bloq there.
-- **Qualtran counts what this library keeps apart.** It keeps separate
-  counts of Clifford gates, T gates, Toffoli or CCZ gates, and rotations.
-- **Qualtran turns counts into machine costs.** Its
-  [physical cost models](https://qualtran.readthedocs.io/en/latest/surface_code/physical_cost_model.html)
-  take those counts as input. One model follows Gidney and Fowler. The
-  compiler project uses their assumptions as its standard for a defensible
-  choice.
+Each stretch of quantum wire carries a `WireOp`, the exact product of its
+Clifford+T gates. Combining consecutive one-qubit operations uses the
+existing algebra.
 
-## Why a Merkle tree
+An intersection joins wires at an operation. The only elementary unitary
+intersection is CZ on two distinct wires:
 
-A classical compiler compiles a function once. The machine code exists once,
-and every call refers to it. A quantum circuit has no call. The machine runs
-every use of a subcircuit in full. So the program it runs is as long as the
-gate count.
+```text
+CZ |a,b> = (-1)**(a*b) |a,b>
+```
 
-The September run gives the numbers. Its circuit was a quantized
-Metropolis-Hastings walk with 256 sites, 100 temperatures and 500 steps at
-each temperature. It had 29 billion gates and 303 distinct subcircuits.
+CZ is symmetric in its arguments. Larger operations have bodies built from
+CZ and one-qubit processing. An operation's definition is independent of
+its chosen body, as the CCZ example below shows.
 
-The work of translating that circuit can grow with the 303 and not with the
-29 billion. For that, each subcircuit must be translated once, and each use
-must refer to the result. So each subcircuit needs an identity.
+Intersections are vertices; stretches of wire are labelled edges. Each CZ
+has an input and output port for each wire. Connections identify these
+ports explicitly. A one-wire unitary circuit can be a labelled edge alone.
 
-A programmer gives a function an identity by naming it. Nobody names these
-subcircuits. Programs generate them. The same subcircuit can be generated
-more than once, by different routes. So the identity is computed from
-content. It is a hash. The hash covers the subcircuit's own operations. It
-also covers the hashes of the subcircuits it uses. A tree labelled this way
-is called a Merkle tree. Two equal subcircuits get the same hash, wherever
-they were built.
+### Preparation and measurement
 
-Compilers already do this under other names.
+Preparation creates a quantum wire. Measurement exposes a classical
+outcome. Both primitives act on one qubit; larger preparations and
+measurements are circuits built from them.
 
-- **Separate compilation.** A compiler compiles a unit once, and other code
-  refers to it. Here the unit is a subcircuit and the reference is its hash.
-- **Hash consing and value numbering.** A compiler builds each distinct
-  expression once. It looks the expression up under a hash of its operator
-  and its operands. That is a Merkle tree over expressions.
-  Common-subexpression elimination depends on it. Logic synthesis does the
-  same to circuits and calls it structural hashing.
-- **Build caches.** Bazel and Nix give each build step a key. The key is a
-  hash of the step's inputs, and the inputs include the keys of its
-  dependencies. If the key is unchanged, the stored result is reused. Here
-  the stored results will be a subcircuit's translated forms, its gate
-  counts, and the gate sequence found for a rotation.
-- **Summaries over the call graph.** A compiler analyses a function once and
-  uses the summary at every call. Here a subcircuit's gate counts are sums
-  over the subcircuits it uses. Each of those counts is multiplied by its
-  number of uses. Qualtran computes costs over its call graph in the same
-  way.
-- **Module instantiation.** A hardware description defines a module once,
-  with named ports. Each instance connects those ports to wires. A
-  subcircuit and its uses have that shape.
+The proposed first primitives are preparation of `|0>` and Z measurement.
+H after preparation produces `|+>`; H before Z measurement gives X
+measurement. Whether measurement consumes its qubit or retains a quantum
+output remains to be settled.
 
-A hash matches two subcircuits only if they are written the same way. Two
-choices remove ways of writing one thing twice. Clifford gates are put in
-one fixed form. CZ has no order on its two qubits. The
-[open questions](#open-questions) list the ways that remain.
+Construction records a symbolic result and its dependencies without
+sampling an outcome. Preparation and measurement are separate from the
+unitary `WireOp` algebra.
 
-One requirement follows. The wires belong to each use of a subcircuit and
-not to the subcircuit. Otherwise one adder used on two registers would count
-as two subcircuits.
+### Boundaries and validity
 
-## Why the work is done early
+A circuit has separate ordered input and output boundaries, with quantum
+or classical ports. Preparation and measurement allow these boundaries
+to differ in size and type.
 
-A tool can reuse a subcircuit only if it arrives as the same thing every
-time. Qualtran counts a bloq once for each distinct value. The backend
-team's tools reuse a result that is stored under a key. So the tree has to
-exist before a circuit is written out.
+The operation graph is a finite directed acyclic graph (DAG). Every quantum
+port has exactly one edge: quantum values cannot branch or vanish
+implicitly. Classical results may have several consumers. Both kinds of
+dependency must be acyclic.
 
-Some work could grow with the number of gates the machine runs. The library
-does that work while a circuit is being built. The work then grows with the
-number of gates that are written down.
+The graph records event order along each wire as well as which wires meet.
+Storage order and internal names have no mathematical meaning. Exact unitary
+semantics includes boundary order and overall phase.
 
-- A Clifford gate is merged into its neighbours as it is appended. The merge
-  takes constant time and gives one of 192 shared values.
-- A subcircuit will be hashed once, when it is built.
-- A rotation will be approximated once for each angle and tolerance.
+Validity concerns connections, not simplification. Two consecutive equal
+CZs form a valid circuit; cancelling them is a transformation.
 
-The September run showed what happens otherwise. Its table of subcircuits
-reached 211 MB. One subcircuit was stored once for each of the 256 sites.
-The copies differed only in the qubits they acted on. Cirq, Google's circuit
-library, stored each copy as a separate object.
+## Shared subcircuits
 
-The backend team has measured the same cost.
-[Moflic et al.](https://arxiv.org/abs/2507.20677) report runs of an adder
-circuit. Storing and decomposing the circuit in their own tool took about 5%
-of the run time. Building the circuit in Python took the rest.
+A definition contains a body with ordered local ports. Each occurrence
+binds those ports to wires in its surrounding circuit. For example, a
+three-qubit body's ports 0, 1 and 2 can bind to (a, b, c) in one use and
+(x, y, z) in another. Both uses share the definition; caller names belong
+to the occurrences.
 
-## Foundation
+Expansion creates fresh internal occurrences and reconnects the boundary
+through each binding. Shared definitions must never join the internal
+wires of separate uses.
 
-These rules will define a circuit.
+Definitions form a second DAG, whose edges refer to child definitions.
+It resembles a parse tree over the operations, with repeated subcircuits
+shared. Recursive definitions are excluded.
 
-- **Shape.** A circuit is a finite directed graph with no cycles. It has an
-  ordered list of inputs and an ordered list of outputs.
-- **Vertices.** A vertex is an interaction between wires. The only
-  elementary interaction is CZ on two different wires, where
-  `CZ |a,b> = (-1)**(a*b) |a,b>`. CZ treats its two wires alike.
-- **Edges.** A vertex has an input port and an output port for each of its
-  wires. An edge starts at a circuit input or at an output port. It ends at
-  an input port or at a circuit output. Every port has exactly one edge.
-- **Labels.** Each edge carries an exact operator on one qubit, a `WireOp`.
-- **Meaning.** The overall phase is part of what a circuit means. The order
-  of storage is not. Internal names are not.
-- **Validity.** A valid circuit need not be simplified. It may contain two
-  equal CZs in a row. Removing them is a transformation.
-- **CCZ.** CCZ is not elementary. The equation
-  `CCZ |a,b,c> = (-1)**(a*b*c) |a,b,c>` defines the operation. A circuit
-  built from CZ implements it, and that circuit is called a body. The
-  definition and the body are separate things.
+Tools can inspect, translate or summarise each definition once. Gate
+counting can multiply a child's count by its number of uses. Explicit
+expansion remains available when a task needs elementary operations.
+
+## Equality and hashing
+
+Local ports allow reuse on different caller wires while preserving
+argument roles. A further goal is to give fragments the same canonical
+body and digest when they differ only by a permutation of qubit indices.
+Canonicalisation must retain the boundary permutations needed to reconnect
+each occurrence correctly. It need not delay circuit construction.
+
+A digest will cover boundaries, operations, connections and child digests,
+forming a Merkle DAG. Specify its encoding and recognised equivalences
+when implementing it. Python's `hash()` is not a persistent identifier,
+and a topological traversal does not provide canonical graph labelling.
+
+Different bodies can implement the same operation: moving T through CZ is
+one example. Recognising such identities is later transformation work.
+The initial representation may miss sharing opportunities while preserving
+correct circuit semantics.
 
 ## Example: CCZ
 
-CCZ acts on three wires a, b and c. This body uses six CZ vertices. They are
-listed in an order that respects every wire.
+CCZ is defined by `CCZ |a,b,c> = (-1)**(a*b*c) |a,b,c>`. It negates
+`|111>` and fixes the other computational basis states. Its definition is
+independent of the body chosen to implement it.
+
+This body uses six CZ vertices, listed in an order consistent with each
+wire.
 
 ```text
 vertex   0     1     2     3     4     5
 wires    b,c   a,c   b,c   a,c   a,b   a,b
 ```
 
-Each wire meets four vertices, so it has five edges. The first edge comes
-from the input. The next three join consecutive vertices. The last goes to
-the output. Each edge carries a label. The labels below are gate words, in
-the order the gates run.
+Each wire meets four vertices and has five edges: one from the input,
+three between vertices and one to the output. Their labels are gate words
+in execution order:
 
 ```text
 a:   I    I           I        T           I
@@ -244,19 +180,18 @@ c:   H    H T^-1 H    H T H    H T^-1 H    H T
 ```
 
 Seven edges carry one T or T^-1 each. [tests/test_ccz.py](tests/test_ccz.py)
-holds this data. It compares the body with the definition of CCZ on all
-eight basis states. The arithmetic is exact and includes the phase.
+checks this body against CCZ on all eight basis states, exactly and with
+phase included.
 
 ### Why this body is CCZ
 
-H then CZ then H on a wire is a CNOT onto that wire. So each vertex adds one
-bit into another, modulo 2. Write `^` for that sum. Vertices 0 to 3 add into
-c. Vertices 4 and 5 add into b.
+H, CZ, H on a target wire implements CNOT: addition modulo 2, written `^`.
+Vertices 0 to 3 add into c; vertices 4 and 5 add into b. Together, these
+additions restore the input bits.
 
-T multiplies a basis state by `omega**x`. Here x is the bit on the wire and
-`omega = exp(i*pi/4)`. T^-1 multiplies by `omega**(-x)`. The seven gates act
-on the bits a, b, c, a^b, a^c, b^c and a^b^c. The three T^-1 gates act on
-the three sums of two bits. The exponents add up as follows.
+T contributes `omega**x` on bit x, where `omega = exp(i*pi/4)`; T^-1
+contributes `omega**(-x)`. The seven gates act on a, b, c, a^b, a^c, b^c
+and a^b^c, with T^-1 on the pairwise sums. Thus:
 
 ```text
 a + b + c - (a^b) - (a^c) - (b^c) + (a^b^c) = 4*a*b*c
@@ -264,39 +199,81 @@ a + b + c - (a^b) - (a^c) - (b^c) + (a^b^c) = 4*a*b*c
 
 The total factor is `omega**(4*a*b*c)`, which equals `(-1)**(a*b*c)`.
 
-## Open questions
+## External tools
 
-1. **Are two subcircuits the same if they differ only by moving a gate that
-   commutes?** T commutes with CZ. The T on wire a could sit on any of a's
-   five edges. That gives five bodies and five hashes for one operator.
-   Answering "no" costs repeated translation. It does not cost correctness.
-2. **Where is the symmetry of an operation recorded?** CCZ treats a, b and c
-   alike. This body does not. Its wires carry one, two and four T gates.
-   Should a use on (a, b, c) and a use on (b, a, c) have the same hash?
-3. **Do a subcircuit's wire names enter its hash?** The purpose gives a
-   qubit a name and no position. The foundation gives a circuit ordered
-   inputs and outputs. Suppose names enter the hash. Then two subcircuits
-   that differ only in naming are translated twice. Suppose they do not.
-   Then a fixed numbering must replace the names before hashing. The walk in
-   BACKEND.md needs that numbering too.
+Resource estimators translate logical circuits into hardware and time
+requirements under a machine model. Those estimates depend on layout,
+scheduling, error correction and magic-state supply, not just gate counts.
 
-## Next step
+Rottnest coordinates such a compilation and estimation pipeline. Qualtran
+represents algorithms as composable blocks, called bloqs, and supports
+[resource counting over their call graph](https://qualtran.readthedocs.io/en/latest/resource_counting/call_graph.html).
+Both are possible consumers; their adapters are their authors' responsibility.
 
-The next step is a subcircuit as a node of the tree. A node holds its own
-operations. It holds its uses of other subcircuits, with the wires supplied
-to each. It holds a hash over both. The CCZ body is the first node.
+### Rottnest research
 
-Three tests come with it. The body built twice has one hash. A circuit that
-uses the body twice stores it once. The check in `tests/test_ccz.py` passes
-when it is run from the node.
+These notes summarise public code and papers examined on 16 November 2026.
+No backend code or adapter was run.
 
-These pieces of work come later.
+| Tool | Role in the recorded pipeline |
+| --- | --- |
+| Rottnest | Reads logical circuits, coordinates compilation and reports resource estimates |
+| Pandora | Stores circuits in a database and divides them into reusable pieces |
+| Cabaliser | Compiles a piece into a graph state and measurement description |
+| T scheduler | Synthesises rotations and schedules their T-state resources |
 
-- The walk for the backend team.
-- Inversion.
-- Arithmetic.
-- Preparation and measurement.
-- Writing out to Qualtran.
+Rottnest divides a circuit into pieces called widgets that fit a machine
+register. Cabaliser translates each into a graph state, local Clifford
+operations and measurements. A graph state is prepared from `|+>` qubits
+by applying CZ along its graph's edges. This graph describes a state;
+it is distinct from this library's operation DAG.
 
-An earlier and longer plan is in the Git history. Run
-`git show fbf69f9:DESIGN.md` to read it.
+Later stages handle layout, scheduling, magic states and code distance.
+See [Nguyen et al., Section V](https://arxiv.org/abs/2509.13546) for the
+pipeline, [Saadatmand et al.](https://arxiv.org/abs/2406.06015) for the
+machine, and [Moflic et al.](https://arxiv.org/abs/2507.20677) for Pandora.
+
+The snapshot suggests four considerations for an adapter:
+
+- **Vocabulary:** Cabaliser accepts basic Cliffords, CNOT, CZ, tagged Z
+  rotations and measurement on numbered qubits. Its additional output
+  Clifford labels are not accepted as input.
+- **Rotations:** each tagged rotation adds a graph qubit and is synthesised
+  later. Expanding it into T gates beforehand changes this representation.
+  Angles are in units of pi; precision is run-wide despite the presence of
+  per-rotation tolerance fields.
+- **Reuse:** START/END markers cache a subcircuit result; REQUEST reuses it
+  with another wire binding. Markers also end widgets, so call boundaries
+  can affect estimates.
+- **Semantics:** the parser does not preserve general classical control,
+  and the pipeline decomposes CCZ into T gates. Supported measurement and
+  control contracts would need to be established.
+
+Sources: [Cabaliser](https://github.com/QSI-BAQS/cabaliser) (`9bc6ed1`),
+[rottnest_py](https://github.com/QSI-BAQS/rottnest_py) (`0109b89`),
+[t_scheduler](https://github.com/QSI-BAQS/t_scheduler) (`5af6a31`) and
+[rottnest_example_executables](https://github.com/QSI-BAQS/rottnest_example_executables)
+(`289b3dc`). Private repositories and Pandora's source were not examined.
+
+### Library boundary
+
+Consumers should be able to inspect a definition's ordered ports,
+operations, measurement dependencies and child bindings without expanding
+every occurrence. Adapters choose serialization, decomposition and call
+boundaries, and match port, angle, phase and measurement conventions.
+
+Exact traversal retains unitary phase; any consumer-specific omission
+belongs in its adapter. The library's semantics remain independent of
+consumer limitations. No adapter is implemented yet.
+
+## Implementation order
+
+First add single-qubit preparation and measurement, settling their contracts
+and composition with the existing algebra. Then introduce intersections
+through explicit ports, starting with CZ. Represent the CCZ body above and
+reuse its independent exact check.
+
+Shared definitions and bindings build on this structure. Rotation synthesis
+and coherent arithmetic constructors supply the higher-level operations.
+General equivalence machinery, permutation canonicalisation and adapters
+can follow as needed.

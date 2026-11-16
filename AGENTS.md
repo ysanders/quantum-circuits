@@ -1,99 +1,108 @@
 # Working on quantum-circuits
 
-This file guides anyone who changes this repository, human or AI.
-
-Read three documents first. [README.md](README.md) documents the code that
-exists. [DESIGN.md](DESIGN.md) gives the library's purpose, the plan for
-circuits and the open questions. [BACKEND.md](BACKEND.md) describes the
-tools that will consume the circuits. Keep what is implemented apart from
-what is planned.
+Read [README.md](README.md) for the implemented API and
+[DESIGN.md](DESIGN.md) for purpose, mathematics and planned work.
+This file gives instructions for changing the repository.
 
 ## Purpose and scope
 
-The library provides exact Clifford+T algebra on one qubit. No circuit type
-exists yet.
+Build a small Python library for the author's quantum algorithms and
+compiler. It must construct, inspect and manipulate circuits, sharing
+subcircuit definitions across uses on different registers.
 
-Do the work that was asked for and stop there. Leave unrelated work alone.
-Do not redesign things in passing.
+The intended scope is:
 
-Some changes depart from the foundation in DESIGN.md. Others answer one of
-its open questions. Explain such a change and settle the question before
-committing to it. Routine work inside the agreed scope needs no further
-approval.
+- Circuit representation, construction and shared definitions.
+- Rotation synthesis: approximate a specified single-qubit rotation to a
+  requested accuracy using Clifford+T gates.
+- Coherent arithmetic constructors, including polynomial evaluation on
+  quantum registers. Python builds the circuit; the quantum computer
+  performs the arithmetic.
+
+For quantum signal processing (QSP), accept phase angles computed by an
+external library. Physical layout, scheduling and machine resource
+estimation also belong to external tools. Their authors write adapters;
+backend requirements do not determine this library's mathematical model.
+
+## Current state and next work
+
+Only exact single-qubit Clifford+T algebra exists. The public exports are
+`Clif`, `WireOp`, `op`, `I`, `X`, `Y`, `Z`, `H`, `S` and `T`.
+Circuit types, rotation synthesis and arithmetic constructors are planned.
+
+Next add single-qubit preparation and measurement, then wire intersections.
+The measurement output contract remains open. The old graph and arithmetic
+recipes in Git history are references, not requirements for the new model.
+
+## Working rules
+
+- Stay within the requested task. Long-term design goals do not authorise
+  unrelated implementation work.
+- Ask a focused question when an algorithm's meaning or an interface's
+  intent is unclear. Do not turn an assumption into a design premise.
+- Explain and settle design departures and open questions before
+  implementing them. Routine work within agreed scope needs no approval.
+- Use ordered local ports and explicit occurrence bindings. Caller wire
+  names must not enter a definition's identity.
+- Preserve exact unitary phase, boundary order and measurement dependencies.
+- Separate graph validity from simplification. Do not restore the old
+  normalisation requirements as validity rules.
+- Keep primitive preparation and measurement single-qubit, and the
+  elementary unitary intersection binary CZ. Larger operations have bodies.
+- Develop through concrete circuits. Permutation-invariant hashing must
+  not delay construction.
+- Keep README.md about available code and DESIGN.md about rationale,
+  examples, open questions and external tools. Label proposals and never
+  document an unimplemented name as an import.
 
 ## Student style
 
-Write the code as an answer key for an undergraduate. Use the simplest
-conventional construction that makes the mathematics and the algorithm
-plain.
+Write as an undergraduate answer key: use conventional constructions that
+make the mathematics and algorithm plain.
 
-- **Values and functions.** Prefer functions and frozen dataclasses. Use
-  ordinary tuples, lists, dictionaries and sets where they fit.
-- **Names and control flow.** Choose descriptive names. Keep control flow
-  simple. Use intermediate values and explicit loops when they make the
-  argument easier to follow.
-- **Invariants.** State the invariant. Explain why a step that is not
-  obvious preserves it. A comment explains mathematics, ordering or a design
-  choice.
-- **Small functions.** Give each function one job. Add a helper when it
-  makes a concrete operation clearer. Do not add extension points for needs
-  that do not exist. Avoid generic frameworks, metaprogramming and deep
-  inheritance.
-- **Objects.** A class is welcome when it gives a clearer account of state
-  and behaviour that belong together. A small mutable builder can be
-  appropriate. So can a helper for exact arithmetic. A functional style does
-  not forbid methods or local mutation.
-- **Copying.** Build up a result locally and freeze it once. Do not copy a
-  whole growing circuit or operator string at each step only to keep it
-  immutable.
-- **Efficiency.** Use efficient algorithms that a reader can follow. If an
-  optimisation is not obvious, state its invariant and show why it is
-  needed.
-- **Errors.** Check inputs at public boundaries. Reject a malformed value
-  with a useful error. Do not convert it silently. Keep type annotations and
+- **Values and objects.** Prefer functions, frozen dataclasses and ordinary
+  collections. Use classes when they clarify related state and behaviour;
+  methods, local mutation and small mutable builders are welcome.
+- **Names and flow.** Use descriptive names, simple control flow and
+  explicit intermediate values or loops where they help the reader.
+- **Invariants.** State them and explain non-obvious preservation steps.
+  Comments should explain mathematics, ordering or design choices.
+- **Functions.** Give each one a clear job. Add helpers for concrete
+  operations, not speculative extension points. Avoid generic frameworks,
+  metaprogramming and deep inheritance.
+- **Efficiency.** Build results locally and freeze once. Avoid copying a
+  growing circuit or operator string at every step. Use readable efficient
+  algorithms; explain why a non-obvious optimisation is needed and correct.
+- **Inputs.** Validate public boundaries and reject malformed values with
+  useful errors. Do not silently coerce them. Keep annotations and
   docstrings concrete.
-- **Exactness.** Keep exact arithmetic exact. Floating point may serve as an
-  independent check in tests. It does not replace an exact identity or the
-  tracking of phase.
-- **Paradigm.** Do not rewrite sound code only to change its programming
-  style.
+- **Exactness.** Preserve exact arithmetic and phase. Floating point can
+  provide independent test evidence, not replace an exact identity.
+- **Existing code.** Do not rewrite sound code solely to change its paradigm.
 
-The Clifford table generator is an example of this policy. Organise its
-exact scalar, matrix and table calculations in the way that explains them
-best. There is no standing preference for or against rewriting that file
-with classes.
+Apply these criteria to the Clifford table generator too. Choose functions
+or classes according to which explains its calculations most clearly.
 
 ## Checks and generated data
 
-Use Python 3.10 or later. The package and its tests use only the standard
-library. Add a dependency only for a concrete need.
+Use Python 3.10 or later and the standard library. Add a dependency only for
+a concrete need.
 
-Run the checks that fit the change. For a change to the code, run these from
-the repository root.
+For code changes, run from the repository root:
 
 ```sh
 python3 -m unittest discover -v
 python3 tools/generate_clifford_tables.py --check
 ```
 
-Run `python3 -m examples.basic` as well when you change the interface of the
-algebra or its example.
+Also run `python3 -m examples.basic` when changing the algebra's interface
+or its example. For documentation changes, check links, examples and
+agreement with package exports; do not add tests that repeat prose.
 
-For a change to the documents, check the links and the examples. Check that
-the text agrees with what the package exports. Do not add tests that only
-repeat the prose.
+Never edit entries in `quantum_circuits/_clifford_tables.py` by hand.
+Change the generator, run `python3 tools/generate_clifford_tables.py`,
+then verify with `--check`.
 
-`quantum_circuits/_clifford_tables.py` is generated. Do not edit its entries
-by hand. Change the generator, regenerate with
-`python3 tools/generate_clifford_tables.py`, and then verify with `--check`.
-
-Check a decomposition against an independent exact calculation, as
-`tests/test_ccz.py` does. Include the phase and the order of the inputs and
-outputs. A bounded enumeration or a random test is evidence against
-regressions. It is not a proof of a general theorem.
-
-Keep the current scope visible. The package exports only `Clif`, `WireOp`,
-`op` and the gate constants for one qubit. An older graph implementation and
-its tests remain in the Git history. Do not bring back its normalisation
-requirements as rules for validity. Do not document a planned name as an
-import until it exists.
+Check decompositions with independent exact calculations, including phase
+and boundary order, as in `tests/test_ccz.py`. Bounded enumeration and
+random tests provide regression evidence, not general proofs.
