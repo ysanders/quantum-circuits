@@ -17,6 +17,8 @@ __all__ = ['Clif', 'clifford', 'I', 'X', 'Y', 'Z', 'H', 'S']
 
 @dataclass(frozen=True, slots=True)
 class Clif:
+    """An exact Clifford represented by a frame and a scalar phase."""
+
     frame: int
     phase: int = 0
 
@@ -29,10 +31,12 @@ class Clif:
 
     @property
     def rep(self) -> int:
+        """Index of the representative in (I, H, S, HS, SH, HSH)."""
         return self.frame // 4
 
     @property
     def pauli(self) -> int:
+        """Index of the Pauli factor in (I, X, Y, Z)."""
         return self.frame % 4
 
     @property
@@ -47,14 +51,18 @@ class Clif:
         )
 
     def __matmul__(self, other: Clif) -> Clif:
+        """Matrix product: apply other, then self, retaining scalar phase."""
         if not isinstance(other, Clif):
             return NotImplemented
         frame, correction = FRAME_PRODUCT[self.frame][other.frame]
-        return _VALUES[8 * frame + (self.phase + other.phase + correction) % 8]
+        phase = (self.phase + other.phase + correction) % 8
+        return _VALUES[8 * frame + phase]
 
     def inverse(self) -> Clif:
+        """Exact adjoint; the scalar phase changes sign."""
         frame, correction = FRAME_INVERSE[self.frame]
-        return _VALUES[8 * frame + (correction - self.phase) % 8]
+        phase = (correction - self.phase) % 8
+        return _VALUES[8 * frame + phase]
 
     @classmethod
     def from_word(cls, word: str) -> Clif:
@@ -66,22 +74,29 @@ class Clif:
         if not isinstance(word, str):
             raise TypeError('a Clifford word must be a string')
         result = I
-        for name in word:
-            if name.isspace():
+        for letter in word:
+            if letter.isspace():
                 continue
             try:
-                op = _NAMED[name]
+                gate = _NAMED[letter]
             except KeyError:
-                raise ValueError(f'unknown Clifford letter {name!r}; use IXYZHS') from None
-            result = op @ result
+                raise ValueError(
+                    f'unknown Clifford letter {letter!r}; use IXYZHS'
+                ) from None
+            # Each new gate executes after the prefix, so it multiplies on the left.
+            result = gate @ result
         return result
 
 
 # Products, inverses, and word constructors share this small pool of values.
 # Direct dataclass construction remains available and uses the same equality.
-_VALUES = tuple(Clif(frame, phase) for frame in range(24) for phase in range(8))
+_VALUES = tuple(
+    Clif(frame, phase)
+    for frame in range(24)
+    for phase in range(8)
+)
 I, X, Y, Z, H, S = (_VALUES[8 * frame] for frame in (0, 1, 2, 3, 4, 8))
-_NAMED = dict(zip('IXYZHS', (I, X, Y, Z, H, S)))
+_NAMED = {'I': I, 'X': X, 'Y': Y, 'Z': Z, 'H': H, 'S': S}
 
 
 def clifford(*operations: str | Clif) -> Clif:
@@ -90,10 +105,10 @@ def clifford(*operations: str | Clif) -> Clif:
     clifford('H', 'S') == clifford('HS') == S @ H.
     """
     result = I
-    for op in operations:
-        if isinstance(op, str):
-            op = Clif.from_word(op)
-        if not isinstance(op, Clif):
+    for operation in operations:
+        if isinstance(operation, str):
+            operation = Clif.from_word(operation)
+        if not isinstance(operation, Clif):
             raise TypeError('clifford() accepts words and Clif values')
-        result = op @ result
+        result = operation @ result
     return result

@@ -1,61 +1,99 @@
 """Independent single-qubit complex matrices; never use the runtime tables."""
 
+from __future__ import annotations
+
 import cmath
 import math
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from quantum_circuits import Clif, WireOp
+
+Matrix = tuple[complex, complex, complex, complex]
 
 IDENTITY = (1, 0, 0, 1)
 PAULI_X = (0, 1, 1, 0)
 PAULI_Y = (0, -1j, 1j, 0)
 PAULI_Z = (1, 0, 0, -1)
-HADAMARD = tuple(x / math.sqrt(2) for x in (1, 1, 1, -1))
+ROOT_HALF = 1 / math.sqrt(2)
+HADAMARD = (ROOT_HALF, ROOT_HALF, ROOT_HALF, -ROOT_HALF)
 PHASE_S = (1, 0, 0, 1j)
 OMEGA = cmath.exp(1j * math.pi / 4)
+PHASE_T = (1, 0, 0, OMEGA)
 
 
-def mm(a, b):
+def matrix_product(left: Matrix, right: Matrix) -> Matrix:
+    """Ordinary 2-by-2 matrix multiplication, with row-major entries."""
+    a00, a01, a10, a11 = left
+    b00, b01, b10, b11 = right
     return (
-        a[0] * b[0] + a[1] * b[2],
-        a[0] * b[1] + a[1] * b[3],
-        a[2] * b[0] + a[3] * b[2],
-        a[2] * b[1] + a[3] * b[3],
+        a00 * b00 + a01 * b10,
+        a00 * b01 + a01 * b11,
+        a10 * b00 + a11 * b10,
+        a10 * b01 + a11 * b11,
     )
 
 
-def dagger(a):
-    return tuple(complex(a[j]).conjugate() for j in (0, 2, 1, 3))
+def adjoint(matrix: Matrix) -> Matrix:
+    """Conjugate transpose, including scalar phase."""
+    return (
+        complex(matrix[0]).conjugate(),
+        complex(matrix[2]).conjugate(),
+        complex(matrix[1]).conjugate(),
+        complex(matrix[3]).conjugate(),
+    )
 
 
 PAULIS = (IDENTITY, PAULI_X, PAULI_Y, PAULI_Z)
-BASES = (
-    IDENTITY, HADAMARD, PHASE_S,
-    mm(HADAMARD, PHASE_S), mm(PHASE_S, HADAMARD),
-    mm(mm(HADAMARD, PHASE_S), HADAMARD),
+REPRESENTATIVES = (
+    IDENTITY,
+    HADAMARD,
+    PHASE_S,
+    matrix_product(HADAMARD, PHASE_S),
+    matrix_product(PHASE_S, HADAMARD),
+    matrix_product(matrix_product(HADAMARD, PHASE_S), HADAMARD),
 )
-FRAMES = tuple(mm(p, r) for r in BASES for p in PAULIS)
+FRAMES = tuple(
+    matrix_product(pauli, representative)
+    for representative in REPRESENTATIVES
+    for pauli in PAULIS
+)
 
-
-def matrix(op):
-    return tuple(OMEGA ** op.phase * x for x in FRAMES[op.frame])
-
-
-AXIS_GATES = {
-    'x': mm(mm(HADAMARD, (1, 0, 0, OMEGA)), HADAMARD),
-    'y': mm(mm(mm(mm(PHASE_S, HADAMARD), (1, 0, 0, OMEGA)), HADAMARD), dagger(PHASE_S)),
-    'z': (1, 0, 0, OMEGA),
+# Construct T_x = H T H and T_y = S T_x S^-1 directly from conventional gates.
+AXIS_X = matrix_product(matrix_product(HADAMARD, PHASE_T), HADAMARD)
+AXIS_Y = matrix_product(matrix_product(PHASE_S, AXIS_X), adjoint(PHASE_S))
+AXIS_GATES = {'x': AXIS_X, 'y': AXIS_Y, 'z': PHASE_T}
+NAMED = {
+    'I': IDENTITY,
+    'X': PAULI_X,
+    'Y': PAULI_Y,
+    'Z': PAULI_Z,
+    'H': HADAMARD,
+    'S': PHASE_S,
+    'T': PHASE_T,
 }
-NAMED = dict(zip('IXYZHST', (IDENTITY, PAULI_X, PAULI_Y, PAULI_Z, HADAMARD, PHASE_S, AXIS_GATES['z'])))
 
 
-def operator_matrix(op):
-    result = matrix(op.initial)
-    for axis in op.axes:
-        result = mm(AXIS_GATES[axis], result)
+def clifford_matrix(value: Clif) -> Matrix:
+    """Evaluate a Clifford from its frame and scalar exponent."""
+    phase = OMEGA ** value.phase
+    frame = FRAMES[value.frame]
+    return phase * frame[0], phase * frame[1], phase * frame[2], phase * frame[3]
+
+
+def operator_matrix(value: WireOp) -> Matrix:
+    """Evaluate the initial Clifford followed by the axes in execution order."""
+    result = clifford_matrix(value.initial)
+    for axis in value.axes:
+        result = matrix_product(AXIS_GATES[axis], result)
     return result
 
 
-def word_matrix(word):
+def word_matrix(word: str) -> Matrix:
+    """Evaluate a raw gate word without calling the runtime normalizer."""
     result = IDENTITY
     for letter in word:
-        if not letter.isspace():
-            result = mm(NAMED[letter], result)
+        if letter.isspace():
+            continue
+        result = matrix_product(NAMED[letter], result)
     return result

@@ -1,9 +1,13 @@
-"""Run from the project root with: python3 -m examples.basic."""
+"""Show exact composition, inversion, lowering, and phase bookkeeping.
+
+Run from the project root with: python3 -m examples.basic.
+"""
 
 from quantum_circuits import H, I, S, T, clifford, op
 
 
 def main() -> None:
+    # Words list gates in execution order; matrix products apply the right first.
     assert op('HH') == I
     assert op('H', 'S') == S @ H
     assert op(clifford('HS')) == S @ H
@@ -15,14 +19,15 @@ def main() -> None:
     print('T then T:', op(T, T))
     print('T in the H basis:', H @ T @ H)
 
-    value = op('HTSHT')
-    assert value.inverse() @ value == I
-    lowered = ''.join(value.iter_gates())
-    assert op(lowered) == value
-    print('Canonical operator:', value)
-    print('Exact H/S/T decomposition:', lowered)
-    print('Minimal T-count:', value.t_count)
+    operator = op('HTSHT')
+    assert operator.inverse() @ operator == I
+    gate_word = ''.join(operator.iter_gates())
+    assert op(gate_word) == operator
+    print('Canonical operator:', operator)
+    print('Exact H/S/T decomposition:', gate_word)
+    print('Minimal T-count:', operator.t_count)
 
+    # This product is omega times identity, so its phase must survive reduction.
     scalar = (H @ S) ** 3
     assert scalar == op(phase=1)
     assert not scalar.is_identity

@@ -128,7 +128,11 @@ rather than editing entries, regenerate with
 
 Keep implementations direct and explicit: ordinary functions, frozen values,
 clear invariants, and local mutation where it makes an algorithm easier to
-follow. [AGENTS.md](AGENTS.md) records the development guidance.
+follow. The runtime accumulator documents its matrix-order stack invariant.
+The table generator separates exact scalar and matrix arithmetic, finite-table
+construction, and source rendering; it uses breadth-first search for H/S words.
+The test oracles construct conventional matrices independently of those tables.
+[AGENTS.md](AGENTS.md) records the development guidance.
 
 | Location | Responsibility |
 | --- | --- |

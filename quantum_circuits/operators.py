@@ -10,20 +10,26 @@ from __future__ import annotations
 from collections.abc import Iterator
 from dataclasses import dataclass
 
-from .clifford import H as _H, I as _I, S as _S, X as _X, Y as _Y, Z as _Z
-from .clifford import Clif
 from ._clifford_tables import CLIFFORD_WORDS, PAULI_ACTION
+from .clifford import Clif
+from .clifford import H as _H, I as _I, S as _S, X as _X, Y as _Y, Z as _Z
 
 __all__ = ['WireOp', 'op', 'I', 'X', 'Y', 'Z', 'H', 'S', 'T']
 
 _AXES = 'xyz'
 # S_a = T_a**2; all are exact Clifford values.
-_SQUARES = (_H @ _S @ _H, _S @ _H @ _S @ _H @ _S.inverse(), _S)
-_INVERSE_SQUARES = tuple(c.inverse() for c in _SQUARES)
+_AXIS_SQUARES = (
+    _H @ _S @ _H,
+    _S @ _H @ _S @ _H @ _S.inverse(),
+    _S,
+)
+_AXIS_SQUARE_INVERSES = tuple(square.inverse() for square in _AXIS_SQUARES)
 _OMEGA = Clif(0, 1)
-_NEGATIVE_CORRECTIONS = tuple(_OMEGA @ c for c in _INVERSE_SQUARES)
+_NEGATIVE_AXIS_CORRECTIONS = tuple(
+    _OMEGA @ inverse_square for inverse_square in _AXIS_SQUARE_INVERSES
+)
 _AXIS_WORDS = ('HTH', 'SSSHTHS', 'T')  # execution order
-_PHASE_FREE = tuple(Clif(frame) for frame in range(24))
+_UNPHASED_CLIFFORDS = tuple(Clif(frame) for frame in range(24))
 
 
 @dataclass(frozen=True, slots=True, repr=False)
@@ -43,13 +49,13 @@ class WireOp:
             raise TypeError('initial must be a Clif')
         if not isinstance(self.axes, str):
             raise TypeError('axes must be a string')
-        previous = None
+        previous_axis = None
         for axis in self.axes:
             if axis not in _AXES:
                 raise ValueError('axes must contain only lowercase x, y, z')
-            if axis == previous:
+            if axis == previous_axis:
                 raise ValueError('adjacent axes must differ; use op() to normalise words')
-            previous = axis
+            previous_axis = axis
 
     @property
     def t_count(self) -> int:
@@ -58,6 +64,7 @@ class WireOp:
 
     @property
     def is_clifford(self) -> bool:
+        """Whether the canonical form needs no T gates."""
         return not self.axes
 
     @property
@@ -69,7 +76,7 @@ class WireOp:
         """This operator divided by omega**phase."""
         if not self.initial.phase:
             return self
-        return WireOp(_PHASE_FREE[self.initial.frame], self.axes)
+        return WireOp(_UNPHASED_CLIFFORDS[self.initial.frame], self.axes)
 
     @property
     def is_identity(self) -> bool:
@@ -80,34 +87,38 @@ class WireOp:
         """Matrix product: apply other, then self."""
         if not isinstance(other, WireOp):
             return NotImplemented
-        result = _Accumulator(self)
-        result.right_operator(other)
-        return result.freeze()
+        accumulator = _Accumulator(self)
+        accumulator.right_operator(other)
+        return accumulator.freeze()
 
     def inverse(self) -> WireOp:
         """Exact adjoint, returned in canonical form."""
-        result = _Accumulator()
-        result.right_clifford(self.initial.inverse())
+        accumulator = _Accumulator()
+        accumulator.right_clifford(self.initial.inverse())
+        # Reverse the matrix factors: C^-1 T_first^-1 ... T_last^-1.
         for axis in self.axes:
-            index = _AXES.index(axis)
+            axis_index = _AXES.index(axis)
             # T_a^-1 = S_a^-1 T_a, with no additional scalar phase.
-            result.right_clifford(_INVERSE_SQUARES[index])
-            result.right_axis(index)
-        return result.freeze()
+            accumulator.right_clifford(_AXIS_SQUARE_INVERSES[axis_index])
+            accumulator.right_axis(axis_index)
+        return accumulator.freeze()
 
     def __pow__(self, exponent: int) -> WireOp:
         """Integer powers; zero is I and negative powers use the inverse."""
         if type(exponent) is not int:
             raise TypeError('exponent must be an integer (not a boolean)')
         base = self
+        remaining = exponent
         if exponent < 0:
-            base, exponent = self.inverse(), -exponent
+            base = self.inverse()
+            remaining = -exponent
         result = I
-        while exponent:
-            if exponent & 1:
+        # Invariant: result @ base**remaining equals the requested power.
+        while remaining:
+            if remaining % 2:
                 result = result @ base
-            exponent >>= 1
-            if exponent:
+            remaining //= 2
+            if remaining:
                 base = base @ base
         return result
 
@@ -117,62 +128,92 @@ class WireOp:
         The Clifford count is not optimised. Scalar phase is realised using
         H/S gates, so no external phase record is needed. Identity is empty.
         """
-        yield from CLIFFORD_WORDS[8 * self.initial.frame + self.initial.phase]
+        clifford_index = 8 * self.initial.frame + self.initial.phase
+        yield from CLIFFORD_WORDS[clifford_index]
         for axis in self.axes:
-            yield from _AXIS_WORDS[_AXES.index(axis)]
+            axis_index = _AXES.index(axis)
+            yield from _AXIS_WORDS[axis_index]
 
     def __repr__(self) -> str:
-        c = self.initial
         return (
-            f'WireOp(phase={c.phase}, rep={c.rep}, '
-            f'pauli={c.pauli}, axes={self.axes!r})'
+            f'WireOp(phase={self.initial.phase}, rep={self.initial.rep}, '
+            f'pauli={self.initial.pauli}, axes={self.axes!r})'
         )
 
 
 class _Accumulator:
     """Mutable right-product builder; freeze once at the public boundary.
 
-    Store axes in MATRIX order, so the axis next to the Clifford is the
-    stack top. Right multiplication by a Clifford just updates initial.
+    Invariant: matrix_axes lists alternating axes in matrix order, and
+    initial is the rightmost Clifford. The axis next to initial is the
+    stack top. Right multiplication by a Clifford only updates initial.
     For C T_a, conjugation gives T_(+/-b) C. Use
         T_-b = T_b (omega S_b^-1),  T_b T_b = S_b.
     Thus each new axis needs one push or pop and a bounded amount of exact
     Clifford arithmetic. No rescan, recursion, or growing-string copying.
     """
 
-    __slots__ = ('initial', 'axes')
+    __slots__ = ('initial', 'matrix_axes')
 
     def __init__(self, value: WireOp | None = None) -> None:
-        self.initial = _I if value is None else value.initial
-        self.axes = [] if value is None else list(reversed(value.axes))
+        if value is None:
+            self.initial = _I
+            self.matrix_axes: list[str] = []
+        else:
+            self.initial = value.initial
+            self.matrix_axes = list(reversed(value.axes))
 
     def right_clifford(self, value: Clif) -> None:
+        """Multiply by a Clifford on the right of the accumulated operator."""
         self.initial = self.initial @ value
 
-    def right_axis(self, axis: int) -> None:
-        signed = PAULI_ACTION[self.initial.frame][axis]
-        target = abs(signed) - 1
-        if signed < 0:
-            self.initial = _NEGATIVE_CORRECTIONS[target] @ self.initial
-        letter = _AXES[target]
-        if self.axes and self.axes[-1] == letter:
-            self.axes.pop()
-            self.initial = _SQUARES[target] @ self.initial
+    def right_axis(self, axis_index: int) -> None:
+        """Multiply by T_x, T_y, or T_z, indexed by 0, 1, or 2."""
+        signed_axis = PAULI_ACTION[self.initial.frame][axis_index]
+        target_index = abs(signed_axis) - 1
+        if signed_axis < 0:
+            # T_-a = T_a (omega S_a^-1); keep the correction in the Clifford.
+            correction = _NEGATIVE_AXIS_CORRECTIONS[target_index]
+            self.initial = correction @ self.initial
+        axis = _AXES[target_index]
+        if self.matrix_axes and self.matrix_axes[-1] == axis:
+            # T_a T_a = S_a. Popping leaves the remaining axes alternating.
+            self.matrix_axes.pop()
+            self.initial = _AXIS_SQUARES[target_index] @ self.initial
         else:
-            self.axes.append(letter)
+            self.matrix_axes.append(axis)
 
     def right_operator(self, value: WireOp) -> None:
+        """Multiply by a canonical operator, reading its factors in matrix order."""
         for axis in reversed(value.axes):
             self.right_axis(_AXES.index(axis))
         self.right_clifford(value.initial)
 
+    def right_word(self, word: str) -> None:
+        """Multiply by a gate word supplied in execution order."""
+        for letter in reversed(word):
+            if letter.isspace():
+                continue
+            if letter == 'T':
+                self.right_axis(2)
+                continue
+            try:
+                gate = _NAMED_CLIFFORDS[letter]
+            except KeyError:
+                raise ValueError(
+                    f'unknown operator letter {letter!r}; use IXYZHST'
+                ) from None
+            self.right_clifford(gate)
+
     def freeze(self) -> WireOp:
-        return WireOp(self.initial, ''.join(reversed(self.axes)))
+        """Freeze the stack, returning axes to execution order."""
+        axes = ''.join(reversed(self.matrix_axes))
+        return WireOp(self.initial, axes)
 
 
-I, X, Y, Z, H, S = (WireOp(c) for c in (_I, _X, _Y, _Z, _H, _S))
+I, X, Y, Z, H, S = (WireOp(clifford) for clifford in (_I, _X, _Y, _Z, _H, _S))
 T = WireOp(_I, 'z')
-_NAMED_CLIFFORDS = dict(zip('IXYZHS', (_I, _X, _Y, _Z, _H, _S)))
+_NAMED_CLIFFORDS = {'I': _I, 'X': _X, 'Y': _Y, 'Z': _Z, 'H': _H, 'S': _S}
 
 
 def op(
@@ -186,27 +227,17 @@ def op(
     """
     if type(phase) is not int:
         raise TypeError('phase must be an integer (not a boolean)')
-    result = _Accumulator()
+    accumulator = _Accumulator()
     # Read from the last executed part, right-multiplying earlier factors.
     for part in reversed(parts):
         if isinstance(part, str):
-            for letter in reversed(part):
-                if letter.isspace():
-                    continue
-                if letter == 'T':
-                    result.right_axis(2)
-                else:
-                    try:
-                        value = _NAMED_CLIFFORDS[letter]
-                    except KeyError:
-                        raise ValueError(f'unknown operator letter {letter!r}; use IXYZHST') from None
-                    result.right_clifford(value)
+            accumulator.right_word(part)
         elif isinstance(part, Clif):
-            result.right_clifford(part)
+            accumulator.right_clifford(part)
         elif isinstance(part, WireOp):
-            result.right_operator(part)
+            accumulator.right_operator(part)
         else:
             raise TypeError('op() accepts words, Clif, and WireOp values')
     if phase % 8:
-        result.right_clifford(Clif(0, phase))
-    return result.freeze()
+        accumulator.right_clifford(Clif(0, phase))
+    return accumulator.freeze()
