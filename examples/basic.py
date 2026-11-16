@@ -3,14 +3,14 @@
 Run from the project root with: python3 -m examples.basic.
 """
 
-from quantum_circuits import H, I, S, T, clifford, op
+from quantum_circuits import Clif, H, I, S, T, op
 
 
 def main() -> None:
     # Words list gates in execution order; matrix products apply the right first.
     assert op('HH') == I
     assert op('H', 'S') == S @ H
-    assert op(clifford('HS')) == S @ H
+    assert op(Clif.from_word('HS')) == S @ H
     assert op('TT') == S
     assert T ** 8 == I
 

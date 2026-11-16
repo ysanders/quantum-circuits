@@ -8,7 +8,7 @@ import sys
 import unittest
 
 from quantum_circuits._clifford_tables import FRAME_LABELS
-from quantum_circuits.clifford import Clif, H, I, S, X, Y, Z, clifford
+from quantum_circuits.clifford import Clif, H, I, S, X, Y, Z
 from tests.reference import (
     FRAMES, PAULI_X, PAULI_Z, Matrix, adjoint, clifford_matrix, matrix_product,
 )
@@ -29,14 +29,19 @@ class CliffordTests(unittest.TestCase):
         for frame, label in enumerate(FRAME_LABELS):
             # Labels use matrix order; the word parser uses execution order.
             execution_word = label[::-1]
-            self.assertEqual(clifford(execution_word), Clif(frame))
+            self.assertEqual(Clif.from_word(execution_word), Clif(frame))
         named_frames = (I.frame, X.frame, Y.frame, Z.frame, H.frame, S.frame)
         self.assertEqual(named_frames, (0, 1, 2, 3, 4, 8))
 
     def test_read_only_properties_and_repr(self) -> None:
         value = Clif(23, 11)
         self.assertEqual((value.rep, value.pauli, value.phase), (5, 3, 3))
-        self.assertEqual(repr(value), 'Clif(phase=3, rep=5, pauli=3)')
+        self.assertEqual(repr(value), "Clif.from_word('HSHZ', phase=3)")
+        self.assertEqual(repr(S), "Clif.from_word('S')")
+        for frame in range(24):
+            for phase in range(8):
+                other = Clif(frame, phase)
+                self.assertEqual(eval(repr(other), {'Clif': Clif}), other)
         with self.assertRaises(FrozenInstanceError):
             value.frame = 0
         self.assertFalse(hasattr(value, '__dict__'))
@@ -47,7 +52,7 @@ class CliffordTests(unittest.TestCase):
             reduced = Clif(7, phase % 8)
             self.assertEqual(value, reduced)
             self.assertEqual(hash(value), hash(reduced))
-        self.assertEqual(hash(clifford('HXH')), hash(Z))
+        self.assertEqual(hash(Clif.from_word('HXH')), hash(Z))
         values = {
             Clif(frame, phase)
             for frame in range(24)
@@ -65,22 +70,22 @@ class CliffordTests(unittest.TestCase):
                 Clif(frame, phase)
 
     def test_word_execution_order(self) -> None:
-        self.assertEqual(clifford(), I)
-        self.assertEqual(clifford(''), I)
-        self.assertEqual(clifford(' H\nS '), S @ H)
-        self.assertEqual(clifford('H', S), S @ H)
-        self.assertEqual(clifford('HS').frame, 16)
-        self.assertEqual(clifford('SH').frame, 12)
-        self.assertEqual(clifford('XZ'), Clif(2, 2))
-        self.assertEqual(clifford('ZX'), Clif(2, 6))
+        self.assertEqual(Clif.from_word(''), I)
+        self.assertEqual(Clif.from_word(' H\nS '), S @ H)
+        self.assertEqual(Clif.from_word('HS').frame, 16)
+        self.assertEqual(Clif.from_word('SH').frame, 12)
+        self.assertEqual(Clif.from_word('XZ'), Clif(2, 2))
+        self.assertEqual(Clif.from_word('ZX'), Clif(2, 6))
+        self.assertEqual(Clif.from_word('HS', phase=11), Clif(16, 3))
         for word in ('T', 'h', 'H!'):
             with self.assertRaises(ValueError):
-                clifford(word)
+                Clif.from_word(word)
         for value in (None, 3, ['H']):
             with self.assertRaises(TypeError):
-                clifford(value)
-        with self.assertRaises(TypeError):
-            Clif.from_word(None)
+                Clif.from_word(value)
+        for phase in (True, 1.0, '1', None):
+            with self.assertRaises(TypeError):
+                Clif.from_word('H', phase=phase)
 
     def test_named_relations_and_phases(self) -> None:
         self.assertEqual(H @ H, I)
@@ -152,7 +157,7 @@ class CliffordTests(unittest.TestCase):
             expected = clifford_matrix(I)
             for letter in word:
                 expected = matrix_product(named[letter], expected)
-            self.assertMatrixClose(clifford_matrix(clifford(word)), expected)
+            self.assertMatrixClose(clifford_matrix(Clif.from_word(word)), expected)
 
     def test_unsupported_matmul(self) -> None:
         self.assertIs(H.__matmul__(object()), NotImplemented)
@@ -162,7 +167,7 @@ class CliffordTests(unittest.TestCase):
     def test_factory_results_share_values(self) -> None:
         self.assertIs(H @ H, I)
         self.assertIs(H.inverse(), H)
-        self.assertIs(clifford('S'), S)
+        self.assertIs(Clif.from_word('S'), S)
 
     def test_exact_table_regeneration(self) -> None:
         root = Path(__file__).resolve().parents[1]

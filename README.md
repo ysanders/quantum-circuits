@@ -1,6 +1,6 @@
 # Quantum circuits
 
-This codebase is written entirely by me and entirely for me.
+This codebase is written entirely for me.
 
 Use it if you like it.
 
@@ -9,17 +9,16 @@ canonical immutable operators, composition, inversion, integer powers,
 scalar phases, and H/S/T decompositions with minimal T-count. Runtime and
 tests use only the Python standard library.
 
-The previous circuit graph, builder, rewrite passes, and arithmetic recipes
-have been removed. There is no circuit construction API in this version.
-The agreed future architecture and implementation milestones are preserved
-in [DESIGN.md](DESIGN.md); the old prototype remains in Git history.
+There is no circuit type yet. [DESIGN.md](DESIGN.md) records the foundation
+for one, a checked CCZ example, and the questions that example leaves open.
+The old graph prototype remains in Git history.
 
 [Current API](#current-api) · [Development](#development) ·
-[Future circuit design](DESIGN.md)
+[Circuit design](DESIGN.md)
 
 ## Current API
 
-The top-level exports are `Clif`, `clifford`, `WireOp`, `op`, and
+The top-level exports are `Clif`, `WireOp`, `op`, and
 `I`, `X`, `Y`, `Z`, `H`, `S`, `T`.
 
 ### Exact single-qubit operators
@@ -42,10 +41,10 @@ The integer phase multiplies by `exp(i*pi/4)**phase` and is reduced modulo
 eight. The top-level constants I/X/Y/Z/H/S/T are all `WireOp` values.
 
 ```python
-from quantum_circuits import H, I, S, T, clifford, op
+from quantum_circuits import Clif, H, I, S, T, op
 
 assert op("HS") == S @ H
-assert op(clifford("HS")) == S @ H
+assert op(Clif.from_word("HS")) == S @ H
 assert op("TT") == S
 assert T.inverse() @ T == I
 assert T ** 8 == I
@@ -68,8 +67,9 @@ assert word.count("T") == u.t_count
 | `u.is_clifford`, `u.is_identity` | Exact predicates, including phase |
 | `u.phase` | The exponent of the scalar factor in the canonical form, modulo eight |
 | `u.unphased()` | The operator divided by `exp(i*pi/4)**u.phase` |
-| `u.iter_gates()` | H/S/T word in execution order, with exactly `t_count` T gates |
+| `u.iter_gates()` | H/S/T word in execution order, with exactly `t_count` T gates; each run of H and S is a shortest word for its Clifford |
 | Equality and hashing | Exact equality of canonical fields |
+| `repr(u)` | An expression that evaluates to `u` |
 
 Raw construction validates canonical fields; use `op` to normalize arbitrary
 words. The emitted Clifford count need not be minimal. Runtime normalization
@@ -84,15 +84,15 @@ strings through composition incurs avoidable copying.
 `omega**phase * P[pauli] * R[rep]`, where `frame = 4*rep + pauli`,
 `P = (I, X, Y, Z)`, and `R = (I, H, S, HS, SH, HSH)` in matrix order.
 There are 24 frames and eight phases, hence 192 exact values.
-`clifford(*parts)` constructs Clifford words in execution order;
+`Clif.from_word(word, phase=0)` reduces a word in execution order and
+multiplies by `omega**phase`; words accept I/X/Y/Z/H/S and ignore whitespace.
 `op(c)` promotes a Clifford. Constants in `quantum_circuits.clifford`
 have type `Clif`, unlike the top-level `WireOp` constants.
 
 `Clif` also supports exact matrix multiplication with `@`, `inverse()`,
 `is_identity`, and the read-only `frame`, `phase`, `rep`, and `pauli` fields.
-`Clif.from_word(word)` parses a single Clifford word; `clifford(*parts)` also
-accepts existing `Clif` values. Clifford words accept I/X/Y/Z/H/S and ignore
-whitespace. Equality and hashing include the scalar phase.
+Equality and hashing include the scalar phase. `repr` gives an expression
+that evaluates to the value.
 
 ## Development
 
@@ -115,6 +115,9 @@ numerical matrices, all frame triples for associativity, and 8,832 canonical
 Clifford+T values for exact uniqueness through four T gates. They also check
 short words exactly, scalar phases, inverses, powers, H/S/T lowering,
 validation, hashing, and long-word normalization without recursion.
+For canonical values through six T gates they compare `t_count` with a lower
+bound computed from the exact matrix alone. `tests/test_ccz.py` compares the
+CCZ body in DESIGN.md with the definition of CCZ.
 
 The exact matrix oracle is independent of runtime tables and normalization,
 while sharing the generator's elementary scalar arithmetic. A separate
@@ -141,6 +144,7 @@ The test oracles construct conventional matrices independently of those tables.
 | `quantum_circuits/_clifford_tables.py` | Generated finite tables |
 | `tools/generate_clifford_tables.py` | Exact, reproducible table generation |
 | `tests/test_clifford.py`, `tests/test_operators.py` | Algebra and public API checks |
+| `tests/test_ccz.py` | The CCZ body as data, checked exactly |
 | `tests/exact_reference.py`, `tests/reference.py` | Exact and numerical matrix oracles |
 | `examples/basic.py` | Runnable single-qubit algebra example |
-| `DESIGN.md` | Future circuit architecture and rewrite milestones |
+| `DESIGN.md` | Circuit foundation, CCZ example, open questions |

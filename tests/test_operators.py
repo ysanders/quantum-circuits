@@ -6,7 +6,8 @@ from itertools import product
 import random
 import unittest
 
-from quantum_circuits import Clif, H, I, S, T, X, Y, Z, WireOp, clifford, op
+from quantum_circuits import Clif, H, I, S, T, X, Y, Z, WireOp, op
+from quantum_circuits._clifford_tables import CLIFFORD_WORDS
 from tests import exact_reference as exact
 from tests.reference import Matrix, adjoint, matrix_product, operator_matrix, word_matrix
 
@@ -37,7 +38,7 @@ class OperatorTests(unittest.TestCase):
         self.assertEqual(op('HS'), S @ H)
         self.assertEqual(op(' H\nS '), op(H, S))
         self.assertEqual(op('HS', T, 'SH'), op('HSTSH'))
-        self.assertEqual(op(clifford('HS')), op('HS'))
+        self.assertEqual(op(Clif.from_word('HS')), op('HS'))
         self.assertEqual(op('HTH'), op(H, T, H))
         self.assertEqual(op('TT'), S)
         self.assertEqual(T @ T, S)
@@ -76,8 +77,8 @@ class OperatorTests(unittest.TestCase):
             pow(T, 2, 3)
 
     def test_repr_immutability_and_properties(self) -> None:
-        self.assertEqual(repr(op('HTH')), "WireOp(phase=0, rep=0, pauli=0, axes='x')")
-        self.assertEqual(repr(S), "WireOp(phase=0, rep=2, pauli=0, axes='')")
+        self.assertEqual(repr(op('HTH')), "WireOp(initial=Clif.from_word('I'), axes='x')")
+        self.assertEqual(repr(S), "WireOp(initial=Clif.from_word('S'), axes='')")
         self.assertEqual(str(T), repr(T))
         self.assertFalse(hasattr(T, '__dict__'))
         for name, value in (('axes', ''), ('initial', H.initial)):
@@ -150,7 +151,18 @@ class OperatorTests(unittest.TestCase):
                     self.assertEqual(op(value), value)
         self.assertEqual(len(seen), 8832)
 
+    def test_t_count_meets_an_independent_lower_bound(self) -> None:
+        # exact.t_count_lower_bound(U) holds for every H/S/T word denoting U.
+        # Equality therefore shows that t_count is minimal for each value
+        # checked, without appeal to the cited normal-form theorem.
+        rng = random.Random(712)
+        for axes in canonical_axes(6):
+            value = WireOp(Clif(rng.randrange(24), rng.randrange(8)), axes)
+            bound = exact.t_count_lower_bound(exact.operator_matrix(value))
+            self.assertEqual(bound, value.t_count, value)
+
     def test_all_bounded_inverses_and_lowerings(self) -> None:
+        namespace = {'WireOp': WireOp, 'Clif': Clif}
         for axes in canonical_axes(3):
             for frame in range(24):
                 for phase in range(8):
@@ -170,6 +182,14 @@ class OperatorTests(unittest.TestCase):
                     self.assertEqual(word.count('T'), value.t_count)
                     self.assertEqual(op(word), value)
                     self.assertMatrixClose(word_matrix(word), operator_matrix(value))
+                    # No run of H and S is longer than the table's shortest
+                    # word for the same Clifford.
+                    for run in word.split('T'):
+                        clifford = Clif.from_word(run)
+                        shortest = CLIFFORD_WORDS[8 * clifford.frame + clifford.phase]
+                        self.assertEqual(len(run), len(shortest), word)
+
+                    self.assertEqual(eval(repr(value), namespace), value)
         self.assertEqual(list(I.iter_gates()), [])
 
     def test_all_signed_axis_conjugations(self) -> None:

@@ -10,9 +10,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ._clifford_tables import FRAME_INVERSE, FRAME_PRODUCT
+from ._clifford_tables import FRAME_INVERSE, FRAME_LABELS, FRAME_PRODUCT
 
-__all__ = ['Clif', 'clifford', 'I', 'X', 'Y', 'Z', 'H', 'S']
+__all__ = ['Clif', 'I', 'X', 'Y', 'Z', 'H', 'S']
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,10 +45,12 @@ class Clif:
         return self.frame == 0 and self.phase == 0
 
     def __repr__(self) -> str:
-        return (
-            f'Clif(phase={self.phase}, '
-            f'rep={self.rep}, pauli={self.pauli})'
-        )
+        """An expression that evaluates to this value."""
+        # Frame labels use matrix order; from_word reads execution order.
+        word = FRAME_LABELS[self.frame][::-1]
+        if self.phase:
+            return f'Clif.from_word({word!r}, phase={self.phase})'
+        return f'Clif.from_word({word!r})'
 
     def __matmul__(self, other: Clif) -> Clif:
         """Matrix product: apply other, then self, retaining scalar phase."""
@@ -65,11 +67,12 @@ class Clif:
         return _VALUES[8 * frame + phase]
 
     @classmethod
-    def from_word(cls, word: str) -> Clif:
-        """Reduce I/X/Y/Z/H/S in execution order; whitespace is ignored.
+    def from_word(cls, word: str, phase: int = 0) -> Clif:
+        """Reduce I/X/Y/Z/H/S in execution order, then multiply by omega**phase.
 
-        The empty word denotes I. Inverses can be expressed with inverse(),
-        or as words (for example 'SSS'). No floating-point comparison is used.
+        Whitespace is ignored and the empty word denotes I. Inverses can be
+        expressed with inverse(), or as words (for example 'SSS'). No
+        floating-point comparison is used.
         """
         if not isinstance(word, str):
             raise TypeError('a Clifford word must be a string')
@@ -85,7 +88,8 @@ class Clif:
                 ) from None
             # Each new gate executes after the prefix, so it multiplies on the left.
             result = gate @ result
-        return result
+        # Clif(0, phase) is the scalar omega**phase; constructing it validates phase.
+        return Clif(0, phase) @ result
 
 
 # Products, inverses, and word constructors share this small pool of values.
@@ -97,18 +101,3 @@ _VALUES = tuple(
 )
 I, X, Y, Z, H, S = (_VALUES[8 * frame] for frame in (0, 1, 2, 3, 4, 8))
 _NAMED = {'I': I, 'X': X, 'Y': Y, 'Z': Z, 'H': H, 'S': S}
-
-
-def clifford(*operations: str | Clif) -> Clif:
-    """Compose words and Clifford values in execution order.
-
-    clifford('H', 'S') == clifford('HS') == S @ H.
-    """
-    result = I
-    for operation in operations:
-        if isinstance(operation, str):
-            operation = Clif.from_word(operation)
-        if not isinstance(operation, Clif):
-            raise TypeError('clifford() accepts words and Clif values')
-        result = operation @ result
-    return result
