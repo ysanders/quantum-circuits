@@ -9,9 +9,9 @@ canonical immutable operators, composition, inversion, integer powers,
 scalar phases, and H/S/T decompositions with minimal T-count. Runtime and
 tests use only the Python standard library.
 
-There is no circuit type yet. [DESIGN.md](DESIGN.md) records the foundation
-for one, a checked CCZ example, and the questions that example leaves open.
-The old graph prototype remains in Git history.
+There is no circuit type yet. [DESIGN.md](DESIGN.md) records the library's
+purpose, the foundation for a circuit type, a checked CCZ example, and the
+open questions. The old graph prototype remains in Git history.
 
 [Current API](#current-api) · [Development](#development) ·
 [Circuit design](DESIGN.md)
@@ -147,4 +147,4 @@ The test oracles construct conventional matrices independently of those tables.
 | `tests/test_ccz.py` | The CCZ body as data, checked exactly |
 | `tests/exact_reference.py`, `tests/reference.py` | Exact and numerical matrix oracles |
 | `examples/basic.py` | Runnable single-qubit algebra example |
-| `DESIGN.md` | Circuit foundation, CCZ example, open questions |
+| `DESIGN.md` | Purpose, circuit foundation, CCZ example, open questions |

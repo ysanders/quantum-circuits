@@ -1,8 +1,9 @@
 # Working on quantum-circuits
 
 Read [README.md](README.md) for the implemented API and [DESIGN.md](DESIGN.md)
-for the circuit foundation, its checked example, and the open questions. Keep
-implemented behavior distinct from plans.
+for the library's purpose, its place between the compiler and the backend
+team, the circuit foundation, its checked example, and the open questions.
+Keep implemented behavior distinct from plans.
 
 ## Purpose and scope
 
