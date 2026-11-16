@@ -1,174 +1,241 @@
 # Circuit design
 
-No circuit type exists yet. [README.md](README.md) documents what is
-implemented: exact single-qubit Clifford+T operators. This document records
-the purpose of the library, its place between the compiler and the backend
-team, the foundation for circuits, one checked example, and the open
-questions.
+This document says what the library is for and how it will represent a
+circuit. Two other documents go with it. [README.md](README.md) documents
+the code that exists today. [BACKEND.md](BACKEND.md) describes the tools
+that will consume the circuits.
 
-[Purpose](#purpose) · [Where this layer sits](#where-this-layer-sits) ·
+The library has no type for a circuit yet. The code so far handles operators
+on one qubit.
+
+[Purpose](#purpose) · [Where the library sits](#where-the-library-sits) ·
 [Why a Merkle tree](#why-a-merkle-tree) ·
-[Why the work is done before extraction](#why-the-work-is-done-before-extraction) ·
+[Why the work is done early](#why-the-work-is-done-early) ·
 [Foundation](#foundation) · [Example: CCZ](#example-ccz) ·
 [Open questions](#open-questions) · [Next step](#next-step)
 
 ## Purpose
 
-This library is the Python layer between the compiler's output and the
-backend team's tools. It sits above Qualtran, which is its extraction target.
-It is part prototype, part reference implementation.
+I am building a compiler for quantum algorithms with my research group. A
+user writes an algorithm at a high level, and the compiler produces
+circuits. A second team estimates what a circuit costs to run on a
+fault-tolerant quantum computer. This document calls them the backend team.
 
-It holds a circuit at one chosen point in compilation: the canonical form of
-fault-tolerant execution, which is single-qubit Cliffords plus routing plus
-magic state distillation. Single-qubit Cliffords are normalised. The only
-other primitives are T and CZ. CZ is symmetric, so a qubit needs a name and
-no position. The magic states assumed are T and CCZ; the representation does
-not need CCZ, which is a starting point for the more complex picture. Cost
-analysis proper happens further down. This layer keeps the information a
-heuristic needs.
+This library sits between the two. It is the Python layer that holds the
+compiler's circuits and passes them on. It is a prototype. It is also a
+reference implementation, which means a small and clear version that other
+code can be checked against.
 
-A complex circuit is a Merkle tree of subcircuits. A subcircuit is then
-lowered once, however often it is used.
+### The problem
 
-The library is also the foundation for tools I am writing myself: gridsynth,
-quantum signal processing phase angles, and polynomial evaluation.
+In September 2026 a test run counted the gates in one circuit. It found 29
+billion. A tool that handles that circuit gate by gate does 29 billion
+pieces of work.
 
-## Where this layer sits
+Those gates came from 303 distinct subcircuits, each used many times. A tool
+that handles each subcircuit once does 303 pieces of work. This library
+stores a circuit so that tools can work that way.
+
+### What the library holds
+
+The library holds a circuit at one fixed stage of compilation. That stage
+follows the standard picture of fault-tolerant computing. In that picture a
+computation has three ingredients. They are Clifford gates on single qubits,
+routes between qubits, and magic states. A magic state is a specially
+prepared state. The computer uses one up to perform a gate that it cannot
+perform directly.
+
+The library has one kind of operation for each ingredient.
+
+- **A Clifford gate on one qubit.** These are the gates that can be built
+  from H and S. The library rewrites every run of them into one fixed form.
+  Two runs that make the same gate are stored as the same value.
+- **CZ.** This gate acts on two qubits. It multiplies a basis state by -1
+  when both qubits are 1. It needs a route between the two qubits. CZ treats
+  its two qubits alike. So a qubit needs a name, and it does not need a
+  position in a list.
+- **T.** This is the gate `diag(1, exp(i*pi/4))`. Each T uses up one magic
+  state.
+
+I assume the only magic states are T and CCZ. The representation does not
+need CCZ. These assumptions are a starting point for a fuller picture.
+
+The library does not work out what a circuit costs. The backend team does
+that, with knowledge of the machine. The library keeps enough information
+for a rough estimate.
+
+### How the library holds it
+
+The library stores a circuit as a tree of subcircuits. Each subcircuit is
+stored once and translated once, however many times it is used.
+[Why a Merkle tree](#why-a-merkle-tree) explains how.
+
+### What else the library is for
+
+The library is the base for three tools that I am writing myself. The first
+is gridsynth, which approximates a rotation by a sequence of H, S and T
+gates. The second computes the phase angles for quantum signal processing.
+The third is polynomial evaluation.
+
+## Where the library sits
 
 ```text
-compiler  ->  this layer  ->  Qualtran  ->  backend team
+compiler  ->  this library  ->  backend team
+                            ->  Qualtran
 ```
 
-The compiler's circuit-level output arrives here.
+Circuits arrive from the compiler. They leave in two directions.
 
-The backend team compiles a logical program for a machine and costs it. They
-decide where logical qubits are placed, how operations are routed between
-them, when each operation runs, which factory supplies each magic state, and
-how ancillas are allocated and reused. Those decisions depend on the device,
-and they set the cost of a computation. This layer makes none of them.
+### To the backend team
 
-This layer gives the backend team a program in a form their tools accept and
-at a size they can store. The program names every operation that consumes a
-magic state and every pair of qubits that must interact, and it keeps the
-subcircuit structure.
+The backend team estimates what a circuit costs on a machine built from
+surface-code patches. They decide where each logical qubit sits. They decide
+how operations are routed and when each one runs. They decide which factory
+supplies each magic state. They report the number of physical qubits and the
+run time. Those answers depend on the machine, and this library decides none
+of them.
 
-Qualtran is that form, for four reasons.
+The library keeps its own representation. It offers the backend team a walk
+over a circuit. The walk lists the gates of a subcircuit in the order they
+run. It also marks each place where another subcircuit is used.
+[BACKEND.md](BACKEND.md) describes their tools and the walk.
 
-- The backend team's tools read Cirq. Cirq's fault-tolerant resource
-  estimation [has moved to Qualtran](https://groups.google.com/g/cirq-announce/c/ODloFuQoze0),
-  and Qualtran [interoperates with Cirq](https://qualtran.readthedocs.io/en/latest/cirq_interop/cirq_interop.html),
-  which its documentation describes as analogous to a quantum assembly
-  language.
-- Qualtran keeps a program as a hierarchy. A bloq decomposes into bloqs, and
-  its [call graph](https://qualtran.readthedocs.io/en/latest/resource_counting/call_graph.html)
-  lists each callee once with the number of calls. One subcircuit here
-  becomes one bloq there.
-- Qualtran's accounting separates what this layer separates: Cliffords from
-  T, Toffoli or CCZ, and rotations.
-- Qualtran's [physical cost models](https://qualtran.readthedocs.io/en/latest/surface_code/physical_cost_model.html)
-  take those counts as input. One of them follows Gidney and Fowler, whose
-  expectations are the compiler project's standard for a defensible choice.
+### To Qualtran
+
+Qualtran is a Python library from Google for writing quantum algorithms and
+counting what they cost. I plan to write circuits out in Qualtran's format,
+for three reasons.
+
+- **Qualtran keeps a program as a hierarchy.** Its unit is called a bloq. A
+  bloq is made of smaller bloqs. Its
+  [call graph](https://qualtran.readthedocs.io/en/latest/resource_counting/call_graph.html)
+  lists each smaller bloq once, with the number of times it is used. One
+  subcircuit here becomes one bloq there.
+- **Qualtran counts what this library keeps apart.** It keeps separate
+  counts of Clifford gates, T gates, Toffoli or CCZ gates, and rotations.
+- **Qualtran turns counts into machine costs.** Its
+  [physical cost models](https://qualtran.readthedocs.io/en/latest/surface_code/physical_cost_model.html)
+  take those counts as input. One model follows Gidney and Fowler. The
+  compiler project uses their assumptions as its standard for a defensible
+  choice.
 
 ## Why a Merkle tree
 
 A classical compiler compiles a function once. The machine code exists once,
-and each call site refers to it. A circuit has no call. The machine executes
-every use of a subcircuit in place, so the program it executes is as long as
-its gate count. In September 2026 a costing run of the quantized
-Metropolis-Hastings walk (256 sites, 100 temperatures, 500 steps each)
-counted 29 billion gates. They came from 303 distinct subcircuits.
+and every call refers to it. A quantum circuit has no call. The machine runs
+every use of a subcircuit in full. So the program it runs is as long as the
+gate count.
 
-The work of lowering can scale with 303 and not with 29 billion. It does so
-if each subcircuit is lowered once and each use refers to the result. That
-requires every subcircuit to have an identity.
+The September run gives the numbers. Its circuit was a quantized
+Metropolis-Hastings walk with 256 sites, 100 temperatures and 500 steps at
+each temperature. It had 29 billion gates and 303 distinct subcircuits.
 
-A programmer gives a function its identity by naming it. Nobody names these
-subcircuits: programs generate them, and the same subcircuit is generated
-more than once, by different routes. The identity is therefore computed from
-content. It is a hash of the subcircuit's own operations together with the
-hashes of the subcircuits it uses. A tree whose nodes are labelled this way
-is a Merkle tree. Equal subcircuits have equal hashes wherever they were
-built.
+The work of translating that circuit can grow with the 303 and not with the
+29 billion. For that, each subcircuit must be translated once, and each use
+must refer to the result. So each subcircuit needs an identity.
 
-Compilers already work this way, under other names.
+A programmer gives a function an identity by naming it. Nobody names these
+subcircuits. Programs generate them. The same subcircuit can be generated
+more than once, by different routes. So the identity is computed from
+content. It is a hash. The hash covers the subcircuit's own operations. It
+also covers the hashes of the subcircuits it uses. A tree labelled this way
+is called a Merkle tree. Two equal subcircuits get the same hash, wherever
+they were built.
 
-- **Separate compilation.** A unit is compiled once and linked by reference.
-  Here the unit is a subcircuit and the reference is its hash.
+Compilers already do this under other names.
+
+- **Separate compilation.** A compiler compiles a unit once, and other code
+  refers to it. Here the unit is a subcircuit and the reference is its hash.
 - **Hash consing and value numbering.** A compiler builds each distinct
-  expression once by looking it up under a hash of its operator and the
-  identities of its operands. That is a Merkle tree over expressions, and
-  common-subexpression elimination depends on it. Logic synthesis does the
+  expression once. It looks the expression up under a hash of its operator
+  and its operands. That is a Merkle tree over expressions.
+  Common-subexpression elimination depends on it. Logic synthesis does the
   same to circuits and calls it structural hashing.
-- **Build caches.** Bazel and Nix key each build step on a hash of its
-  inputs, which include the hashes of its dependencies. An unchanged hash
-  means the stored result is reused. Here the stored results will be a
-  subcircuit's lowered form, its counts, a gridsynth word, and its Qualtran
-  bloq.
+- **Build caches.** Bazel and Nix give each build step a key. The key is a
+  hash of the step's inputs, and the inputs include the keys of its
+  dependencies. If the key is unchanged, the stored result is reused. Here
+  the stored results will be a subcircuit's translated forms, its gate
+  counts, and the gate sequence found for a rotation.
 - **Summaries over the call graph.** A compiler analyses a function once and
-  uses the summary at every call. Here a subcircuit's counts are the sums of
-  its children's counts, each multiplied by its number of uses. Qualtran
-  computes costs over its call graph in the same way.
+  uses the summary at every call. Here a subcircuit's gate counts are sums
+  over the subcircuits it uses. Each of those counts is multiplied by its
+  number of uses. Qualtran computes costs over its call graph in the same
+  way.
 - **Module instantiation.** A hardware description defines a module once,
-  with formal ports, and each instance connects those ports to wires. A
+  with named ports. Each instance connects those ports to wires. A
   subcircuit and its uses have that shape.
 
-A hash identifies equal things only when equal things are written the same
-way. Normalising Cliffords and using a symmetric CZ each remove one way of
-writing an operation twice. The open questions list ways that remain.
+A hash matches two subcircuits only if they are written the same way. Two
+choices remove ways of writing one thing twice. Clifford gates are put in
+one fixed form. CZ has no order on its two qubits. The
+[open questions](#open-questions) list the ways that remain.
 
-One requirement follows. The wires a subcircuit acts on belong to each use
-and not to the subcircuit. Otherwise the same adder on two registers is two
-subcircuits.
+One requirement follows. The wires belong to each use of a subcircuit and
+not to the subcircuit. Otherwise one adder used on two registers would count
+as two subcircuits.
 
-## Why the work is done before extraction
+## Why the work is done early
 
-Qualtran counts a bloq once per distinct value, so equal subcircuits have to
-reach it as equal values. The tree therefore has to exist before extraction,
-and extraction then creates one bloq for each distinct subcircuit.
+A tool can reuse a subcircuit only if it arrives as the same thing every
+time. Qualtran counts a bloq once for each distinct value. The backend
+team's tools reuse a result that is stored under a key. So the tree has to
+exist before a circuit is written out.
 
-Work whose cost could follow the gate count belongs here, at a cost that
-follows what is written. A Clifford is already fused as it is appended, in
-constant time, into one of 192 shared values. A subcircuit will be hashed
-once, when it is built. A rotation will be synthesised once for each angle
-and tolerance.
+Some work could grow with the number of gates the machine runs. The library
+does that work while a circuit is being built. The work then grows with the
+number of gates that are written down.
 
-The September run measured the failure this prevents. Its table of
-subcircuits reached 211 MB because one subcircuit was stored once for each of
-the 256 sites. The copies differed only in the qubits they acted on, and Cirq
-stored each as a separate object.
+- A Clifford gate is merged into its neighbours as it is appended. The merge
+  takes constant time and gives one of 192 shared values.
+- A subcircuit will be hashed once, when it is built.
+- A rotation will be approximated once for each angle and tolerance.
+
+The September run showed what happens otherwise. Its table of subcircuits
+reached 211 MB. One subcircuit was stored once for each of the 256 sites.
+The copies differed only in the qubits they acted on. Cirq, Google's circuit
+library, stored each copy as a separate object.
+
+The backend team has measured the same cost.
+[Moflic et al.](https://arxiv.org/abs/2507.20677) report runs of an adder
+circuit. Storing and decomposing the circuit in their own tool took about 5%
+of the run time. Building the circuit in Python took the rest.
 
 ## Foundation
 
-- A circuit is a finite directed acyclic graph with an ordered input boundary
-  and an ordered output boundary.
-- A vertex is an interaction. The only elementary interaction is CZ on two
-  distinct wires, `CZ |a,b> = (-1)**(a*b) |a,b>`. Its two operands are
-  symmetric.
-- A vertex has an input port and an output port for each of its wires. An
-  edge runs from a boundary input or an output port to an input port or a
-  boundary output. Every port has exactly one edge.
-- An edge is labelled by an exact `WireOp`.
-- Scalar phase is part of a circuit's meaning. Storage order and internal
-  names are not.
-- Validity does not require a reduced form. A circuit may contain two
-  adjacent equal CZs; removing them is a transformation.
-- CCZ is not elementary. `CCZ |a,b,c> = (-1)**(a*b*c) |a,b,c>` defines the
-  operation. A body built from CZ implements it. The definition and the body
-  are separate.
+These rules will define a circuit.
+
+- **Shape.** A circuit is a finite directed graph with no cycles. It has an
+  ordered list of inputs and an ordered list of outputs.
+- **Vertices.** A vertex is an interaction between wires. The only
+  elementary interaction is CZ on two different wires, where
+  `CZ |a,b> = (-1)**(a*b) |a,b>`. CZ treats its two wires alike.
+- **Edges.** A vertex has an input port and an output port for each of its
+  wires. An edge starts at a circuit input or at an output port. It ends at
+  an input port or at a circuit output. Every port has exactly one edge.
+- **Labels.** Each edge carries an exact operator on one qubit, a `WireOp`.
+- **Meaning.** The overall phase is part of what a circuit means. The order
+  of storage is not. Internal names are not.
+- **Validity.** A valid circuit need not be simplified. It may contain two
+  equal CZs in a row. Removing them is a transformation.
+- **CCZ.** CCZ is not elementary. The equation
+  `CCZ |a,b,c> = (-1)**(a*b*c) |a,b,c>` defines the operation. A circuit
+  built from CZ implements it, and that circuit is called a body. The
+  definition and the body are separate things.
 
 ## Example: CCZ
 
-Wires a, b, c. Six CZ vertices, listed in an order consistent with every
-wire:
+CCZ acts on three wires a, b and c. This body uses six CZ vertices. They are
+listed in an order that respects every wire.
 
 ```text
 vertex   0     1     2     3     4     5
 wires    b,c   a,c   b,c   a,c   a,b   a,b
 ```
 
-Each wire meets four vertices and so has five edges: from the input, between
-consecutive vertices, and to the output. The edge labels, as gate words in
-execution order:
+Each wire meets four vertices, so it has five edges. The first edge comes
+from the input. The next three join consecutive vertices. The last goes to
+the output. Each edge carries a label. The labels below are gate words, in
+the order the gates run.
 
 ```text
 a:   I    I           I        T           I
@@ -177,45 +244,59 @@ c:   H    H T^-1 H    H T H    H T^-1 H    H T
 ```
 
 Seven edges carry one T or T^-1 each. [tests/test_ccz.py](tests/test_ccz.py)
-holds this data and compares it with the definition of CCZ on all eight basis
-states, in exact arithmetic, phase included.
+holds this data. It compares the body with the definition of CCZ on all
+eight basis states. The arithmetic is exact and includes the phase.
 
-H, CZ, H on a target wire is a CNOT, so each vertex adds one bit into another
-modulo 2, written `^`: vertices 0 to 3 add into c, vertices 4 and 5 add into
-b. T multiplies a basis state by `omega**x`, where x is the bit on its wire
-and `omega = exp(i*pi/4)`; T^-1 multiplies by `omega**(-x)`. The seven gates
-act on the bits a, b, c, a^b, a^c, b^c and a^b^c, with T^-1 on the three
-pairwise sums, and
+### Why this body is CCZ
+
+H then CZ then H on a wire is a CNOT onto that wire. So each vertex adds one
+bit into another, modulo 2. Write `^` for that sum. Vertices 0 to 3 add into
+c. Vertices 4 and 5 add into b.
+
+T multiplies a basis state by `omega**x`. Here x is the bit on the wire and
+`omega = exp(i*pi/4)`. T^-1 multiplies by `omega**(-x)`. The seven gates act
+on the bits a, b, c, a^b, a^c, b^c and a^b^c. The three T^-1 gates act on
+the three sums of two bits. The exponents add up as follows.
 
 ```text
 a + b + c - (a^b) - (a^c) - (b^c) + (a^b^c) = 4*a*b*c
 ```
 
-so the total factor is `omega**(4*a*b*c) = (-1)**(a*b*c)`.
+The total factor is `omega**(4*a*b*c)`, which equals `(-1)**(a*b*c)`.
 
 ## Open questions
 
-1. **Are subcircuits that differ by a commuting label one subcircuit?** T
-   commutes with CZ, so the T on wire a could label any of a's five edges:
-   five bodies, five hashes, one operator. A "no" costs duplicated lowering.
-   It does not cost correctness.
-2. **Where is the symmetry of an operation recorded?** CCZ is symmetric in
-   a, b, c. This body is not: its wires carry one, two and four T gates. Do
-   a use of CCZ on (a, b, c) and a use on (b, a, c) have one hash?
-3. **Do a subcircuit's own names enter its hash?** The purpose gives a qubit
-   a name and no position; the foundation above gives a circuit ordered
-   boundaries. If names enter the hash, two subcircuits that differ only in
-   naming are lowered twice. If they do not, something canonical replaces
-   them before hashing.
+1. **Are two subcircuits the same if they differ only by moving a gate that
+   commutes?** T commutes with CZ. The T on wire a could sit on any of a's
+   five edges. That gives five bodies and five hashes for one operator.
+   Answering "no" costs repeated translation. It does not cost correctness.
+2. **Where is the symmetry of an operation recorded?** CCZ treats a, b and c
+   alike. This body does not. Its wires carry one, two and four T gates.
+   Should a use on (a, b, c) and a use on (b, a, c) have the same hash?
+3. **Do a subcircuit's wire names enter its hash?** The purpose gives a
+   qubit a name and no position. The foundation gives a circuit ordered
+   inputs and outputs. Suppose names enter the hash. Then two subcircuits
+   that differ only in naming are translated twice. Suppose they do not.
+   Then a fixed numbering must replace the names before hashing. The walk in
+   BACKEND.md needs that numbering too.
 
 ## Next step
 
-A subcircuit as a node of the tree: its own operations, its uses of other
-subcircuits with the wires supplied to each, and a hash over both. The CCZ
-body is the first node. Its tests: the body built twice has one hash, a
-circuit that uses it twice stores it once, and the check in
-`tests/test_ccz.py` repeats from the node.
+The next step is a subcircuit as a node of the tree. A node holds its own
+operations. It holds its uses of other subcircuits, with the wires supplied
+to each. It holds a hash over both. The CCZ body is the first node.
 
-Inversion, arithmetic, preparation and measurement, and extraction to
-Qualtran follow. An earlier, longer plan is in Git history:
-`git show fbf69f9:DESIGN.md`.
+Three tests come with it. The body built twice has one hash. A circuit that
+uses the body twice stores it once. The check in `tests/test_ccz.py` passes
+when it is run from the node.
+
+These pieces of work come later.
+
+- The walk for the backend team.
+- Inversion.
+- Arithmetic.
+- Preparation and measurement.
+- Writing out to Qualtran.
+
+An earlier and longer plan is in the Git history. Run
+`git show fbf69f9:DESIGN.md` to read it.

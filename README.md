@@ -4,29 +4,51 @@ This codebase is written entirely for me.
 
 Use it if you like it.
 
-The package currently provides **exact single-qubit Clifford+T algebra**:
-canonical immutable operators, composition, inversion, integer powers,
-scalar phases, and H/S/T decompositions with minimal T-count. Runtime and
-tests use only the Python standard library.
+## What this is
 
-There is no circuit type yet. [DESIGN.md](DESIGN.md) records the library's
-purpose, the foundation for a circuit type, a checked CCZ example, and the
-open questions. The old graph prototype remains in Git history.
+This is a Python library for large quantum circuits. The circuits it is
+meant for are built from subcircuits that are used many times. The library
+will store each subcircuit once. That part is planned.
+[DESIGN.md](DESIGN.md) explains the purpose and the plan.
+[BACKEND.md](BACKEND.md) describes the tools that will consume the circuits.
+
+The code that exists today works on one qubit. It handles every operator
+that can be built from the gates H, S and T. These are called Clifford+T
+operators.
+
+- **It is exact.** No number is rounded. The overall phase is kept.
+- **Each operator has one stored form.** Two operators are equal exactly
+  when their stored forms are equal.
+- **It does algebra.** It multiplies operators, inverts them and raises them
+  to integer powers.
+- **It writes an operator back out as gates.** The output is a sequence of
+  H, S and T with the fewest possible T gates.
+
+The code and its tests need only the Python standard library.
+
+There is no type for a circuit yet. An older prototype of a circuit graph
+remains in the Git history.
 
 [Current API](#current-api) · [Development](#development) ·
-[Circuit design](DESIGN.md)
+[Circuit design](DESIGN.md) · [Backend tools](BACKEND.md)
 
 ## Current API
 
-The top-level exports are `Clif`, `WireOp`, `op`, and
-`I`, `X`, `Y`, `Z`, `H`, `S`, `T`.
+The package exports `Clif`, `WireOp`, `op` and the constants `I`, `X`, `Y`,
+`Z`, `H`, `S` and `T`.
 
-### Exact single-qubit operators
+### Exact operators on one qubit
 
-`WireOp(initial: Clif, axes: str = '')` is an immutable canonical exact
-Clifford+T operator, including global phase. The initial Clifford acts first;
-the lowercase axis letters execute left to right, with no equal adjacent
-letters. In matrix order:
+A `WireOp` is an exact Clifford+T operator on one qubit, phase included. The
+constructor is `WireOp(initial: Clif, axes: str = '')`. A value never
+changes after it is made. It has two fields.
+
+- `initial` is a Clifford gate, held as a `Clif`. It acts first.
+- `axes` is a string of the letters x, y and z. Each letter is one T gate
+  about that axis. The letters act from left to right. No letter appears
+  twice in a row.
+
+As a matrix product, the fields mean this.
 
 ```text
 WireOp(C, 'xyz') = T_z T_y T_x C
@@ -35,10 +57,12 @@ T_x = H T_z H
 T_y = S H T_z H S^-1
 ```
 
-`op(*parts, phase=0)` normalizes strings, `Clif` values, and `WireOp`
-values in execution order. Strings accept I/X/Y/Z/H/S/T and ignore whitespace.
-The integer phase multiplies by `exp(i*pi/4)**phase` and is reduced modulo
-eight. The top-level constants I/X/Y/Z/H/S/T are all `WireOp` values.
+`op(*parts, phase=0)` builds a `WireOp` from parts. A part is a string, a
+`Clif` or a `WireOp`. The parts act in the order given. A string may contain
+the letters I, X, Y, Z, H, S and T. Spaces are ignored. `phase` is an
+integer. It multiplies the result by `exp(i*pi/4)**phase` and is taken
+modulo eight. The constants `I`, `X`, `Y`, `Z`, `H`, `S` and `T` exported by
+the package are `WireOp` values.
 
 ```python
 from quantum_circuits import Clif, H, I, S, T, op
@@ -57,46 +81,59 @@ assert op(word) == u
 assert word.count("T") == u.t_count
 ```
 
-| Interface | Contract |
+| Interface | What it gives |
 | --- | --- |
-| `u.initial`, `u.axes` | Frozen canonical fields |
-| `a @ b` | Matrix product: apply b, then a |
-| `u.inverse()` | Exact inverse/adjoint |
-| `u ** n` | Integer power, including zero and negative powers |
-| `u.t_count` | Minimal T-count for this isolated exact operator |
-| `u.is_clifford`, `u.is_identity` | Exact predicates, including phase |
-| `u.phase` | The exponent of the scalar factor in the canonical form, modulo eight |
+| `u.initial`, `u.axes` | The two stored fields. They cannot be changed |
+| `a @ b` | The matrix product. It applies b and then a |
+| `u.inverse()` | The exact inverse |
+| `u ** n` | An integer power. Zero and negative powers work |
+| `u.t_count` | The fewest T gates that any word for this operator can have |
+| `u.is_clifford`, `u.is_identity` | Exact tests. They take the phase into account |
+| `u.phase` | The power of `exp(i*pi/4)` in the stored form, modulo eight |
 | `u.unphased()` | The operator divided by `exp(i*pi/4)**u.phase` |
-| `u.iter_gates()` | H/S/T word in execution order, with exactly `t_count` T gates; each run of H and S is a shortest word for its Clifford |
-| Equality and hashing | Exact equality of canonical fields |
-| `repr(u)` | An expression that evaluates to `u` |
+| `u.iter_gates()` | A word in H, S and T, in the order the gates act. It has exactly `t_count` T gates. Each run of H and S is a shortest word for its Clifford gate |
+| Equality and hashing | Two operators are equal when their stored fields are equal |
+| `repr(u)` | Python code that evaluates to `u` |
 
-Raw construction validates canonical fields; use `op` to normalize arbitrary
-words. The emitted Clifford count need not be minimal. Runtime normalization
-uses finite tables and exact integer operations. Its uniqueness and T-optimality
-come from [Giles and Selinger, Proposition 8.2](https://www.mscs.dal.ca/~selinger/papers/ma-remarks.pdf).
-For long words, batch parts into `op(*parts)`; repeatedly extending immutable
-strings through composition incurs avoidable copying.
+Calling `WireOp(...)` directly checks that the fields are already in the
+stored form. Use `op` to build an operator from any word.
+
+The word from `iter_gates` uses the fewest T gates. It may not use the
+fewest H and S gates.
+
+The library reduces a word with finite tables and exact integer arithmetic.
+The stored form is unique, and it uses the fewest T gates. Both facts come
+from [Giles and Selinger, Proposition 8.2](https://www.mscs.dal.ca/~selinger/papers/ma-remarks.pdf).
+
+For a long word, pass all the parts to one call of `op`. Building the
+operator one `@` at a time copies the growing string each time.
 
 ### Clifford values
 
-`Clif(frame, phase=0)` supplies the supporting Clifford algebra. It denotes
-`omega**phase * P[pauli] * R[rep]`, where `frame = 4*rep + pauli`,
-`P = (I, X, Y, Z)`, and `R = (I, H, S, HS, SH, HSH)` in matrix order.
-There are 24 frames and eight phases, hence 192 exact values.
-`Clif.from_word(word, phase=0)` reduces a word in execution order and
-multiplies by `omega**phase`; words accept I/X/Y/Z/H/S and ignore whitespace.
-`op(c)` promotes a Clifford. Constants in `quantum_circuits.clifford`
-have type `Clif`, unlike the top-level `WireOp` constants.
+A `Clif` is an exact Clifford gate on one qubit, phase included.
+`Clif(frame, phase=0)` stands for the matrix
+`omega**phase * P[pauli] * R[rep]`. Here `omega = exp(i*pi/4)` and
+`frame = 4*rep + pauli`. `P` is the list `(I, X, Y, Z)`. `R` is the list
+`(I, H, S, HS, SH, HSH)`, with each product written in matrix order. There
+are 24 frames and eight phases, which gives 192 values.
 
-`Clif` also supports exact matrix multiplication with `@`, `inverse()`,
-`is_identity`, and the read-only `frame`, `phase`, `rep`, and `pauli` fields.
-Equality and hashing include the scalar phase. `repr` gives an expression
-that evaluates to the value.
+`Clif.from_word(word, phase=0)` builds a `Clif` from a word. The letters act
+in the order written. The word may contain I, X, Y, Z, H and S. Spaces are
+ignored. The result is multiplied by `omega**phase`.
+
+`op(c)` turns a `Clif` into a `WireOp`. The module
+`quantum_circuits.clifford` defines its own constants `I`, `X`, `Y`, `Z`,
+`H` and `S`. Those are `Clif` values. The constants exported by the package
+are `WireOp` values.
+
+A `Clif` supports `@` for the matrix product, `inverse()` and `is_identity`.
+Its fields `frame`, `phase`, `rep` and `pauli` are read-only. Equality and
+hashing include the phase. `repr` gives Python code that evaluates to the
+value.
 
 ## Development
 
-Use Python 3.10 or later. From the project root:
+Use Python 3.10 or later. Run these from the project root.
 
 ```sh
 python3 -m examples.basic
@@ -104,47 +141,67 @@ python3 -m unittest discover -v
 python3 tools/generate_clifford_tables.py --check
 ```
 
-An editable installation is optional for importing from another project:
+To import the package from another project, install it in editable mode.
+This step is optional.
 
 ```sh
 python3 -m pip install -e .
 ```
 
-The tests check all 36,864 exact Clifford products against independent
-numerical matrices, all frame triples for associativity, and 8,832 canonical
-Clifford+T values for exact uniqueness through four T gates. They also check
-short words exactly, scalar phases, inverses, powers, H/S/T lowering,
-validation, hashing, and long-word normalization without recursion.
-For canonical values through six T gates they compare `t_count` with a lower
-bound computed from the exact matrix alone. `tests/test_ccz.py` compares the
-CCZ body in DESIGN.md with the definition of CCZ.
+### What the tests check
 
-The exact matrix oracle is independent of runtime tables and normalization,
-while sharing the generator's elementary scalar arithmetic. A separate
-numerical oracle uses conventional complex matrices. These are bounded
-regression checks; the general normal-form guarantees rely on the cited
-mathematical result.
+- All 36,864 products of two Clifford values, against matrices computed
+  independently.
+- Associativity, for every triple of frames.
+- That the 8,832 stored forms with up to four T gates are all different
+  operators.
+- Short words, phases, inverses and powers.
+- The output in H, S and T.
+- The checking of inputs, and hashing.
+- That a long word is reduced without recursion.
+- That `t_count` meets a lower bound for stored forms with up to six T
+  gates. The bound is computed from the exact matrix alone.
+- That the CCZ body in DESIGN.md equals the definition of CCZ. This test is
+  `tests/test_ccz.py`.
 
-`quantum_circuits/_clifford_tables.py` is generated. Change the generator
-rather than editing entries, regenerate with
-`python3 tools/generate_clifford_tables.py`, then verify with `--check`.
+The tests use two independent references. The first computes exact matrices.
+It shares only basic scalar arithmetic with the table generator. It does not
+use the library's tables or its reduction code. The second uses ordinary
+complex matrices in floating point.
 
-Keep implementations direct and explicit: ordinary functions, frozen values,
-clear invariants, and local mutation where it makes an algorithm easier to
-follow. The runtime accumulator documents its matrix-order stack invariant.
-The table generator separates exact scalar and matrix arithmetic, finite-table
-construction, and source rendering; it uses breadth-first search for H/S words.
-The test oracles construct conventional matrices independently of those tables.
-[AGENTS.md](AGENTS.md) records the development guidance.
+These tests cover a bounded set of cases. The general guarantees rest on the
+theorem cited above.
 
-| Location | Responsibility |
+### Generated tables
+
+`quantum_circuits/_clifford_tables.py` is generated. Do not edit its
+entries. Change the generator, regenerate with
+`python3 tools/generate_clifford_tables.py`, and then verify with `--check`.
+
+### Style of the code
+
+The code is meant to be direct. It uses ordinary functions and values that
+do not change. It states its invariants. It changes local state where that
+makes an algorithm easier to follow.
+
+The table generator keeps three jobs apart. It does exact arithmetic, builds
+the finite tables, and writes the source file. It finds the shortest words
+in H and S by breadth-first search.
+
+[AGENTS.md](AGENTS.md) records the guidance for anyone who works on the
+code.
+
+### Where things are
+
+| Location | What it holds |
 | --- | --- |
-| `quantum_circuits/clifford.py` | Exact Clifford values and composition |
-| `quantum_circuits/operators.py` | Exact Clifford+T values, normalization, and lowering |
-| `quantum_circuits/_clifford_tables.py` | Generated finite tables |
-| `tools/generate_clifford_tables.py` | Exact, reproducible table generation |
-| `tests/test_clifford.py`, `tests/test_operators.py` | Algebra and public API checks |
+| `quantum_circuits/clifford.py` | Exact Clifford values and their products |
+| `quantum_circuits/operators.py` | Exact Clifford+T values, their reduction, and their output as gates |
+| `quantum_circuits/_clifford_tables.py` | The generated finite tables |
+| `tools/generate_clifford_tables.py` | The exact, reproducible table generator |
+| `tests/test_clifford.py`, `tests/test_operators.py` | Tests of the algebra and the public interface |
 | `tests/test_ccz.py` | The CCZ body as data, checked exactly |
-| `tests/exact_reference.py`, `tests/reference.py` | Exact and numerical matrix oracles |
-| `examples/basic.py` | Runnable single-qubit algebra example |
-| `DESIGN.md` | Purpose, circuit foundation, CCZ example, open questions |
+| `tests/exact_reference.py`, `tests/reference.py` | The exact and the numerical reference matrices |
+| `examples/basic.py` | A runnable example of the algebra on one qubit |
+| `DESIGN.md` | The purpose, the plan for circuits, the CCZ example and the open questions |
+| `BACKEND.md` | The tools that will consume the circuits, and what the library offers them |
