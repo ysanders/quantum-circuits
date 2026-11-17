@@ -13,7 +13,8 @@ registers.
 
 The intended scope is:
 
-- Circuit representation, construction and shared definitions.
+- Circuit representation and construction, including circuits that use
+  other circuits as subcircuits.
 - Rotation synthesis: approximate a specified single-qubit rotation to a
   requested accuracy using Clifford+T gates.
 - Coherent arithmetic constructors, including polynomial evaluation on
@@ -30,13 +31,14 @@ Exact single-qubit Clifford+T algebra, circuits of wires that intersect at
 CZ, and the stream module exist. The package exports `Clif`, `WireOp`,
 `op`, `I`, `X`, `Y`, `Z`, `H`, `S`, `T`, `Circuit` and `CircuitBuilder`;
 `quantum_circuits.circuit` and `quantum_circuits.stream` have their own
-exports. Shared definitions, rotation synthesis and arithmetic
-constructors are planned.
+exports. Subcircuits, classical data, rotation synthesis and arithmetic
+constructors are planned. The circuit types abstract over the stream
+language; DESIGN.md lists what they cannot yet express.
 
-Next add shared definitions and bindings. Measurement destroys its wire.
-DESIGN.md's stream section covers classical outcomes. The old graph and
-arithmetic recipes in Git history are references, not requirements for
-the new model.
+Next let circuits use subcircuits, each use binding a subcircuit's ports to
+wires. Measurement destroys its wire. DESIGN.md's stream section covers
+classical outcomes. The old graph and arithmetic recipes in Git history are
+references, not requirements for the new model.
 
 ## Working rules
 

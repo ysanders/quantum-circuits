@@ -7,7 +7,8 @@ Use it if you like it.
 ## What this is
 
 A Python library that serves as a lowering target for my quantum compiler.
-Circuits will be built from shared definitions, so that a consumer can walk one
+A circuit will be able to use other circuits as subcircuits. Each subcircuit
+is stored once, however often it is used, so a consumer can walk a circuit
 without expanding it and extract it to Qualtran, Cirq, Qiskit or another
 library. [DESIGN.md](DESIGN.md) explains the model and its uses, including
 polynomial evaluation.
@@ -23,8 +24,8 @@ preparing `|0>` and end with a measurement in the computational basis.
 `quantum_circuits.stream` parses, checks and expands the stream: the text
 format that fixes what a circuit means.
 
-Circuits cannot share subcircuit definitions yet, and there is no rotation
-synthesiser or arithmetic API. The older circuit prototype remains in Git
+Circuits cannot use subcircuits yet, and there is no rotation synthesiser
+or arithmetic API. The older circuit prototype remains in Git
 history.
 
 The package and its tests use only the Python standard library.

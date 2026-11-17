@@ -11,6 +11,11 @@ An extractor for Qualtran, Cirq, Qiskit or another library stops at
 operations its target provides. The author need not choose a target
 library.
 
+The library's circuit types are an abstraction over the [stream](#stream)
+language. Every circuit they build lowers to a stream, which fixes its
+meaning. They should express everything the stream can; anything they
+cannot yet express is a gap to close.
+
 The scope has three parts:
 
 - **Circuit construction:** operations, wiring, preparation, measurement
@@ -23,8 +28,8 @@ The scope has three parts:
 
 Exact single-qubit Clifford+T algebra, circuits of wires that intersect at
 CZ, with preparation and measurement, and the stream are implemented today;
-see [README.md](README.md). Shared definitions and the constructors below
-are planned.
+see [README.md](README.md). Subcircuits, classical data and the
+constructors below are planned.
 
 [Arithmetic example](#arithmetic-example) · [Circuit representation](#circuit-representation) ·
 [Shared subcircuits](#shared-subcircuits) · [Stream](#stream) ·
@@ -150,8 +155,8 @@ three-qubit body's ports 0, 1 and 2 can bind to (a, b, c) in one use and
 to the occurrences.
 
 Expansion creates fresh internal occurrences and reconnects the boundary
-through each binding. Shared definitions must never join the internal
-wires of separate uses.
+through each binding. A definition used twice must never join the
+internal wires of the two uses.
 
 Definitions form a second DAG, whose edges refer to child definitions.
 It resembles a parse tree over the operations, with repeated subcircuits
@@ -412,7 +417,15 @@ consumer limitations. No adapter is implemented yet.
 ## Implementation order
 
 Wires intersect at CZ, and the CCZ body above is built and checked
-exactly. Next come shared definitions and bindings, built on this
-structure. Rotation synthesis and coherent arithmetic constructors supply
-the higher-level operations. General equivalence machinery, permutation
+exactly. The remaining work on circuits closes the gaps between what
+`Circuit` can express and what the stream can:
+
+- **Subcircuits:** a circuit that uses other circuits, each use binding a
+  subcircuit's ports to the caller's wires. These lower to `START`, `END`
+  and `REQUEST`. This comes next.
+- **Classical data:** gates conditioned on measurement outcomes, `XOR`,
+  `AND` and `NOT`, `DISCARD` and `REPORT`.
+
+Rotation synthesis and coherent arithmetic constructors then supply the
+higher-level operations. General equivalence machinery, permutation
 canonicalisation and adapters can follow as needed.
