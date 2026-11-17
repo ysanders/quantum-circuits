@@ -7,21 +7,21 @@ Use it if you like it.
 ## What this is
 
 A Python library that serves as a lowering target for my quantum compiler.
-Circuits are built from shared definitions, so a consumer can walk one
-without expanding it and extract it to Qualtran, Cirq, Qiskit or another
-library. [DESIGN.md](DESIGN.md) explains the model and its uses, including
+Circuits will be built from shared definitions, so that a consumer can walk
+one without expanding it and extract it to Qualtran, Cirq, Qiskit or
+another library. [DESIGN.md](DESIGN.md) explains the model and its uses, including
 polynomial evaluation.
 
 Today the package provides the exact single-qubit Clifford+T algebra that
-will label wire segments: composition, inverses, integer powers and H/S/T
+labels wire segments: composition, inverses, integer powers and H/S/T
 output with the minimum T count. Operators have unique stored forms,
 including phase, for exact equality and hashing.
 
 A `Circuit` holds wires that meet at CZ vertices. A wire can start by
 preparing `|0>` and end with a measurement in the computational basis.
 
-It also provides `quantum_circuits.stream`, which parses, checks and expands
-the stream: the text format that fixes what a circuit means.
+`quantum_circuits.stream` parses, checks and expands the stream: the text
+format that fixes what a circuit means.
 
 Circuits cannot share subcircuit definitions yet, and there is no rotation
 synthesiser or arithmetic API. The older circuit prototype remains in Git
@@ -244,8 +244,8 @@ python3 -m pip install -e .
 - The CCZ body in DESIGN.md, built with `CircuitBuilder`, against its exact
   definition: the stored circuit with phase, and its stream up to global
   phase, in `tests/test_ccz.py`.
-- Circuits in `tests/test_circuit.py`: the builder's rules, the canonical
-  vertex order, boundaries and streams.
+- Circuits in `tests/test_circuit.py`: the builder's rules, the stored CZ
+  order, boundaries and streams.
 - The lowering of every operator with at most three T gates, against
   independent exact matrices up to phase, in `tests/test_lowering.py`.
 - The stream in `tests/test_stream.py`: text round trips, a digest computed
@@ -283,9 +283,9 @@ search.
 | `tools/generate_clifford_tables.py` | The exact, reproducible table generator |
 | `tests/test_clifford.py`, `tests/test_operators.py` | Tests of the algebra and the public interface |
 | `tests/test_ccz.py` | The CCZ body, built and checked exactly |
-| `tests/test_circuit.py` | Tests of the builder, vertex order, boundaries and streams |
+| `tests/test_circuit.py` | Tests of the builder, stored CZ order, boundaries and streams |
 | `tests/test_lowering.py` | Tests of lowering operators to stream records |
 | `tests/test_stream.py` | Tests of the stream format, rules and expansion |
 | `tests/exact_reference.py`, `tests/reference.py` | The exact and the numerical reference matrices |
 | `examples/basic.py` | A runnable example of the algebra on one qubit |
-| `DESIGN.md` | Purpose, planned circuit model, the stream, arithmetic use case and external-tool context |
+| `DESIGN.md` | Purpose, circuit model, the stream, arithmetic use case and external-tool context |

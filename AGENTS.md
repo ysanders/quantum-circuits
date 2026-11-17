@@ -33,10 +33,10 @@ CZ, and the stream module exist. The package exports `Clif`, `WireOp`,
 exports. Shared definitions, rotation synthesis and arithmetic
 constructors are planned.
 
-Next add shared definitions and bindings.
-Measurement destroys its wire. DESIGN.md's stream section covers classical
-outcomes. The old graph and arithmetic recipes in Git history are
-references, not requirements for the new model.
+Next add shared definitions and bindings. Measurement destroys its wire.
+DESIGN.md's stream section covers classical outcomes. The old graph and
+arithmetic recipes in Git history are references, not requirements for
+the new model.
 
 ## Working rules
 

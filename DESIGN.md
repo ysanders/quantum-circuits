@@ -93,9 +93,8 @@ CZ is symmetric in its arguments. Larger operations have bodies built from
 CZ and one-qubit processing. An operation's definition is independent of
 its chosen body, as the CCZ example below shows.
 
-Intersections are vertices; stretches of wire are labelled edges. Each CZ
-has an input and output port for each wire. Connections identify these
-ports explicitly. A one-wire unitary circuit can be a labelled edge alone.
+Intersections are vertices; stretches of wire are labelled edges. A
+one-wire unitary circuit can be a labelled edge alone.
 
 `Circuit` stores each wire's segments in order and each CZ as the pair of
 wires it joins. CZs on disjoint wires can be applied in either order with
@@ -286,9 +285,9 @@ Canonicalisation must retain the boundary permutations needed to reconnect
 each occurrence correctly. It need not delay circuit construction.
 
 The [stream](#stream) gives a digest's encoding. Child digests enter a
-parent's, forming a Merkle DAG. Python's `hash()` is not a
-persistent identifier,
-and a topological traversal does not provide canonical graph labelling.
+parent's, forming a Merkle DAG. Python's `hash()` is not a persistent
+identifier, and a topological traversal does not provide canonical graph
+labelling.
 
 Different bodies can implement the same operation: moving T through CZ is
 one example. Recognising such identities is later transformation work.
@@ -353,8 +352,7 @@ the stream.
 ### Rottnest research
 
 These notes summarise public code and papers examined on 16 and 17 November
-2026.
-No backend code or adapter was run.
+2026. No backend code or adapter was run.
 
 | Tool | Role in the recorded pipeline |
 | --- | --- |
