@@ -2,14 +2,14 @@
 
 CCZ |a,b,c> = (-1)**(a*b*c) |a,b,c>. CircuitBuilder builds the body from
 DESIGN.md, and two independent exact simulations check it: one of the
-stored circuit, with phase, and one of its stream, up to global phase.
+stored circuit and one of its stream, both including global phase.
 DESIGN.md explains why this body is CCZ.
 """
 
 import unittest
 
 from quantum_circuits import Circuit, CircuitBuilder, H, I, T, WireOp, op
-from quantum_circuits.stream import CliffordGate, CZGate, TGate, check_stream, expand
+from quantum_circuits.stream import CliffordGate, CZGate, Phase, TGate, check_stream, expand
 from tests import exact_reference as exact
 from tools.generate_clifford_tables import (
     Matrix, Scalar, add_scalars, multiply_scalars, negate_scalar,
@@ -122,6 +122,9 @@ def stream_output(operations, basis_index: int) -> list[Scalar]:
             state = apply_matrix(state, exact.T, int(record.qubit))
         elif isinstance(record, CZGate):
             state = apply_cz(state, int(record.first), int(record.second))
+        elif isinstance(record, Phase):
+            state = [multiply_scalars(exact.PHASES[record.exponent], amplitude)
+                     for amplitude in state]
         else:
             raise AssertionError(f'unexpected record {record}')
     return state
@@ -148,19 +151,11 @@ class CCZBodyTests(unittest.TestCase):
             self.assertEqual(circuit_output(circuit, basis_index),
                              ccz_column(basis_index), basis_index)
 
-    def test_stream_is_ccz_up_to_global_phase(self) -> None:
-        # The stream drops global phase, so one phase must serve every column.
+    def test_stream_is_ccz_exactly(self) -> None:
         flat = expand(check_stream(build_ccz_body().to_stream()))
-        outputs = [stream_output(flat.operations, index) for index in range(8)]
-        matching_phases = [
-            phase for phase in exact.PHASES
-            if all(
-                [multiply_scalars(phase, amplitude) for amplitude in ccz_column(index)]
-                == outputs[index]
-                for index in range(8)
-            )
-        ]
-        self.assertEqual(len(matching_phases), 1)
+        for index in range(8):
+            self.assertEqual(stream_output(flat.operations, index),
+                             ccz_column(index), index)
 
 
 if __name__ == '__main__':

@@ -148,12 +148,15 @@ output port, in wire order, which is classical if the wire was measured.
 [DESIGN.md](DESIGN.md#segments-and-cz-vertices), so circuits
 that differ only in the order of commuting CZs are equal.
 `to_stream(names=None)` gives the circuit as a checked stream, with wires
-named `q0`, `q1` and so on unless `names` is given. The stream drops global
-phase.
+named `q0`, `q1` and so on unless `names` is given. The stream retains exact
+phase. A nontrivial scalar is collected in one `PHASE k` record before END,
+where `k` is in `range(8)` and the scalar is `exp(i*pi*k/4)`.
 
 `quantum_circuits.circuit.lower_operator(u, qubit)` gives the stream
-records for one operator. CLIF and T records alternate, with at most one
-CLIF between T gates and exactly `u.t_count` T gates.
+records for one operator, including phase. CLIF and T records alternate,
+with at most one CLIF between T gates and exactly `u.t_count` T gates.
+A final PHASE record carries any scalar contributed by the decomposition.
+It includes the phases of the Clifford runs, not just `u.phase`.
 
 ```python
 from quantum_circuits import CircuitBuilder, H
@@ -190,10 +193,15 @@ assert lines[1:6] == expected
 
 A stream that breaks the format or a rule raises `StreamError`, a
 `ValueError` that names the offending line or record. Records are frozen
-dataclasses: `CliffordGate`, `TGate`, `CZGate`, `Prepare`, `Measure`,
+dataclasses: `Phase`, `CliffordGate`, `TGate`, `CZGate`, `Prepare`, `Measure`,
 `ClassicalOp`, `Discard`, `Report`, `Start`, `End` and `Request`. Name lists
 hold `Port(kind, name)` values, with kind `QUANTUM` (`'q'`) or `CLASSICAL`
 (`'c'`).
+
+`Phase(k)` represents `PHASE k`, an unconditional scalar with no wire
+operand. It requires an integer from 0 to 7. Phase records enter definition
+digests and are retained at every use when a program is expanded. In
+particular, identity and minus identity have different stream digests.
 
 ```python
 from quantum_circuits.stream import (
@@ -242,15 +250,16 @@ python3 -m pip install -e .
 - Words, phases, inverses, powers, H/S/T output, input validation, hashing
   and reduction of a long word without recursion.
 - The CCZ body in DESIGN.md, built with `CircuitBuilder`, against its exact
-  definition: the stored circuit with phase, and its stream up to global
-  phase, in `tests/test_ccz.py`.
+  definition: both the stored circuit and its stream, including phase,
+  in `tests/test_ccz.py`.
 - Circuits in `tests/test_circuit.py`: the builder's rules, the stored CZ
   order, boundaries and streams.
 - The lowering of every operator with at most three T gates, against
-  independent exact matrices up to phase, in `tests/test_lowering.py`.
+  independent exact matrices including phase, in `tests/test_lowering.py`.
 - The stream in `tests/test_stream.py`: text round trips, a digest computed
   independently from DESIGN.md's encoding, digests that ignore names,
-  expansion with fresh names, and one stream breaking each rule.
+  expansion with fresh names and phase at every use, and one stream breaking
+  each rule.
 
 The exact matrix reference shares basic scalar arithmetic with the table
 generator, but uses neither runtime tables nor reduction code. A separate

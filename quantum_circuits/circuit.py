@@ -18,43 +18,48 @@ from dataclasses import dataclass
 from .clifford import Clif
 from .operators import I, WireOp
 from .stream import (
-    CLASSICAL, QUANTUM, CliffordGate, CZGate, End, Measure, Port, Prepare,
+    CLASSICAL, QUANTUM, CliffordGate, CZGate, End, Measure, Phase, Port, Prepare,
     Record, Start, TGate, assign_digests,
 )
 
 __all__ = ['Circuit', 'CircuitBuilder', 'lower_operator']
 
 
-def _append_clifford(records: list[Record], word: str, qubit: str) -> None:
-    """Append the CLIF record for an H/S word, or nothing for an identity frame."""
-    frame = Clif.from_word(word).frame
-    if frame:
-        records.append(CliffordGate(frame, qubit))
+def _append_clifford(records: list[Record], word: str, qubit: str) -> int:
+    """Append the Clifford's frame and return its scalar phase exponent."""
+    clifford = Clif.from_word(word)
+    if clifford.frame:
+        records.append(CliffordGate(clifford.frame, qubit))
+    return clifford.phase
 
 
 def lower_operator(operator: WireOp, qubit: str) -> tuple[Record, ...]:
-    """Stream records for an operator on one qubit, up to global phase.
+    """Exact stream records for an operator on one qubit, including phase.
 
     CLIF and T records alternate, with at most one CLIF between consecutive
     T gates and no CLIF for an identity frame. The records contain exactly
-    operator.t_count T gates. Operators that differ only in phase give
-    equal records.
+    operator.t_count T gates. A final PHASE record carries the product of
+    the Clifford runs' scalar factors, unless that product is identity.
     """
     if not isinstance(operator, WireOp):
         raise TypeError('operator must be a WireOp')
     Port(QUANTUM, qubit)  # rejects a qubit name the stream cannot write
     records: list[Record] = []
     # iter_gates gives an exact H/S/T word in execution order. Each run of H
-    # and S between T gates is one Clifford; its frame drops the phase.
+    # and S between T gates is one Clifford. Replacing a run by its frame
+    # contributes its scalar factor to phase, so exact equality is preserved.
+    phase = 0
     clifford_word = ''
     for gate in operator.iter_gates():
         if gate == 'T':
-            _append_clifford(records, clifford_word, qubit)
+            phase += _append_clifford(records, clifford_word, qubit)
             records.append(TGate(qubit))
             clifford_word = ''
         else:
             clifford_word += gate
-    _append_clifford(records, clifford_word, qubit)
+    phase += _append_clifford(records, clifford_word, qubit)
+    if phase % 8:
+        records.append(Phase(phase % 8))
     return tuple(records)
 
 
@@ -197,8 +202,8 @@ class Circuit:
         """This circuit as a checked stream: one root definition.
 
         names gives each wire's stream name; the default is q0, q1, and so
-        on. Names do not enter the digest. The stream does not specify
-        global phase.
+        on. Names do not enter the digest. Exact phase is retained in a
+        PHASE record before END when the total scalar is nontrivial.
 
         Records follow the stored vertex order. For each vertex, the
         segments that end there come first, its lower wire's then its upper
@@ -216,12 +221,18 @@ class Circuit:
                 Port(QUANTUM, names[wire]) for wire in self.input_wires))
         ]
         segments_emitted = [0] * self.wire_count
+        phase = 0
 
         def emit_next_segment(wire: int) -> None:
+            nonlocal phase
             if segments_emitted[wire] == 0 and wire in self.prepared:
                 records.append(Prepare(names[wire]))
             segment = self.segments[wire][segments_emitted[wire]]
-            records.extend(lower_operator(segment, names[wire]))
+            for record in lower_operator(segment, names[wire]):
+                if isinstance(record, Phase):
+                    phase += record.exponent
+                else:
+                    records.append(record)
             segments_emitted[wire] += 1
 
         for first, second in self.vertices:
@@ -234,6 +245,8 @@ class Circuit:
                 records.append(Measure(names[wire]))
         output_ports = tuple(
             Port(kind, names[wire]) for wire, kind in enumerate(self.outputs))
+        if phase % 8:
+            records.append(Phase(phase % 8))
         records.append(End('root', output_ports))
         return assign_digests(records)
 

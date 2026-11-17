@@ -8,7 +8,7 @@ import unittest
 
 from quantum_circuits import Circuit, CircuitBuilder, H, I, T, op
 from quantum_circuits.stream import (
-    CLASSICAL, QUANTUM, CliffordGate, CZGate, Measure, Port, Prepare, TGate,
+    CLASSICAL, QUANTUM, CliffordGate, CZGate, Measure, Phase, Port, Prepare, TGate,
     check_stream, expand,
 )
 
@@ -146,14 +146,33 @@ class StreamTests(unittest.TestCase):
         ))
         self.assertEqual(flat.outputs, (Port(CLASSICAL, '0'),))
 
-    def test_digest_ignores_names_and_phase(self) -> None:
+    def test_digest_ignores_names_and_preserves_phase(self) -> None:
         def one_wire_digest(operator, name):
             builder = CircuitBuilder(1)
             builder.apply(operator, 0)
             return check_stream(builder.build().to_stream((name,))).root.digest
 
-        self.assertEqual(one_wire_digest(T, 'a'), one_wire_digest(op(T, phase=3), 'b'))
+        self.assertEqual(one_wire_digest(T, 'a'), one_wire_digest(T, 'b'))
+        self.assertNotEqual(one_wire_digest(T, 'a'), one_wire_digest(op(T, phase=3), 'b'))
+        self.assertNotEqual(one_wire_digest(I, 'a'), one_wire_digest(op(phase=4), 'a'))
         self.assertNotEqual(one_wire_digest(T, 'a'), one_wire_digest(op('TH'), 'a'))
+
+    def test_stream_collects_phase_across_segments(self) -> None:
+        builder = CircuitBuilder(2)
+        builder.apply(op(phase=3), 0)
+        builder.cz(0, 1)
+        builder.apply(op(phase=6), 1)
+        flat = expand(check_stream(builder.build().to_stream()))
+        self.assertEqual(flat.operations, (CZGate('0', '1'), Phase(1)))
+
+        other = CircuitBuilder(2)
+        other.cz(0, 1)
+        other.apply(op(phase=1), 0)
+        self.assertEqual(builder.build().to_stream(), other.build().to_stream())
+
+        builder.apply(op(phase=7), 0)
+        flat = expand(check_stream(builder.build().to_stream()))
+        self.assertEqual(flat.operations, (CZGate('0', '1'),))
 
     def test_names(self) -> None:
         records = parity_check().to_stream(('data', 'ancilla'))

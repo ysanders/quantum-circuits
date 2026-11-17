@@ -14,7 +14,7 @@ provides. The author need not choose a target library.
 The library's circuit types are an abstraction over the [stream](#stream)
 language. Every circuit they build lowers to a stream. The stream gives a
 circuit's operational semantics: a program of primitive operations in time
-order, which does not specify global phase. A circuit gives its
+order, including scalar phase. A circuit gives its
 denotational semantics: the exact operation it implements, with one global
 phase. The circuit types should express everything the stream can; anything
 they cannot yet express is a gap to close.
@@ -88,6 +88,9 @@ and an end of the wire. Each segment carries a `WireOp`: the exact product
 of its Clifford+T gates. Combining consecutive one-qubit operations uses
 the existing algebra. In the stream, a segment lowers to CLIF and T records
 in alternation, with at most one CLIF between consecutive T gates.
+The scalar factors of those Clifford runs are retained as PHASE records.
+Lowering a unitary circuit therefore preserves its exact matrix, including
+global phase.
 
 Wires meet only at CZ, which acts on two distinct wires:
 
@@ -183,7 +186,10 @@ quantum name or `c:name` for a classical one.
 
 Quantum operations:
 
-- `CLIF k q`: the single-qubit Clifford with frame `k`, up to phase. Frame
+- `PHASE k`: multiply by `exp(i*pi*k/4)`, where `k` is an integer from 0 to
+  7. This is an unconditional scalar with no wire operand. A definition
+  with no ports can consist of a PHASE record alone.
+- `CLIF k q`: the exact single-qubit Clifford `Clif(k, phase=0)`. Frame
   `k` denotes the matrix product `P[k % 4] R[k // 4]`, with
   `P = (I, X, Y, Z)` and `R = (I, H, S, HS, SH, HSH)`, as in `Clif`.
 - `T q`.
@@ -194,6 +200,12 @@ Quantum operations:
 
 `CLIF`, `T` and `CZ` take an optional condition `if c`, where `c` is a
 classical name. The gate acts only when `c` is 1.
+
+PHASE records may occur anywhere inside a definition. Their exponents add
+modulo eight. `Circuit.to_stream` collects its scalar factors into one PHASE
+record before END and omits it when the total exponent is zero. These
+factors include phases arising in the Clifford decomposition; summing the
+segments' `WireOp.phase` fields alone would not recover them.
 
 Classical operations write a new name: `XOR a b -> c`, `AND a b -> c` and
 `NOT a -> c`. `DISCARD c` ends a classical name. `REPORT c` ends it and
@@ -240,10 +252,11 @@ of the definition's records as stream text, with `d` omitted from its own
 introduction. Each nested `START ... END` block becomes the `REQUEST` record
 for that use.
 
-SHA-256 is provisional, pending a hash function designed for this purpose.
-The digest depends on record order. Library normalisation makes equal
-constructions emit equal records. Equal digests then identify a definition
-across streams, as a standard library needs. For now a stream contains
+Phase records are included in the digest, so identity and minus identity
+have different digests. The digest depends on record order. Library
+normalisation makes equal constructions emit equal records. Equal digests
+then identify a definition across streams, as a standard library needs.
+For now a stream contains
 every definition it uses; linking against a library can come later.
 
 ### Meaning
@@ -251,8 +264,9 @@ every definition it uses; linking against a library can come later.
 Replacing each `REQUEST` by its definition's body, with ports rebound and
 internal names made fresh, gives a flat straight-line program. That program
 is the circuit. A condition decides whether a gate acts, never which record
-comes next. The stream does not specify global phase; each circuit carries
-one.
+comes next. Each use contributes all of its body's PHASE records, including
+repeated uses of the same definition. On a unitary circuit, evaluating the
+flat program gives exactly the circuit's matrix, including global phase.
 
 `quantum_circuits.stream` checks these rules and computes this meaning;
 [README.md](README.md#the-stream) documents it.
@@ -326,7 +340,7 @@ c:   H    H T^-1 H    H T H    H T^-1 H    H T
 Seven segments carry one T or T^-1 each. [tests/test_ccz.py](tests/test_ccz.py)
 builds this body with `CircuitBuilder` and checks it against CCZ on all
 eight basis states, exactly and with phase included. It also checks the
-body's stream, up to global phase.
+body's stream with the same exact phase.
 
 ### Why this body is CCZ
 
@@ -412,9 +426,9 @@ operations and the bindings of their subcircuits, without expanding every
 use. An adapter translates either into its consumer's format,
 decomposition and call boundaries.
 
-The library keeps exact phase; the stream omits it. Any further omission
-belongs in an adapter. The library's semantics remain independent of
-consumer limitations. No adapter is implemented yet.
+The library and the stream both keep exact phase. A consumer that does not
+need phase can omit it in its adapter. The library's semantics remain
+independent of consumer limitations. No adapter is implemented yet.
 
 ## Implementation order
 
@@ -437,11 +451,8 @@ canonicalisation and adapters can follow as needed.
 - **One phase per circuit.** Store a single global phase in `Circuit`,
   with unphased segments, so that circuits differing only in where phase
   sits compare equal.
-- **Digest hash.** Replace SHA-256 with a hash function designed for this
-  purpose.
 - **Stream rule tests.** Match each rule-breaking stream in
   `tests/test_stream.py` to the error for the rule it breaks. A case that
   fails for an incidental reason now passes unnoticed.
 - **Stream module.** Give `quantum_circuits/stream.py` another design pass.
-  At 791 lines it is longer than the algebra modules together, generated
-  tables included; text, checking and expansion could be separate modules.
+  Text parsing, checking and expansion could be separate modules.

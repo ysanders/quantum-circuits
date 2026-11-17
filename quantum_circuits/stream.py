@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 __all__ = [
     'QUANTUM', 'CLASSICAL', 'Port', 'Record',
-    'CliffordGate', 'TGate', 'CZGate', 'Prepare', 'Measure', 'ClassicalOp',
+    'Phase', 'CliffordGate', 'TGate', 'CZGate', 'Prepare', 'Measure', 'ClassicalOp',
     'Discard', 'Report', 'Start', 'End', 'Request',
     'StreamError', 'Definition', 'Program', 'FlatCircuit',
     'parse_stream', 'format_stream', 'check_stream', 'assign_digests', 'expand',
@@ -85,8 +85,21 @@ class Port:
 
 
 @dataclass(frozen=True, slots=True)
+class Phase:
+    """PHASE k: multiply by exp(i*pi*k/4), with no wire operand."""
+
+    exponent: int
+
+    def __post_init__(self) -> None:
+        if type(self.exponent) is not int:
+            raise TypeError('phase exponent must be an integer (not a boolean)')
+        if not 0 <= self.exponent < 8:
+            raise ValueError('phase exponent must be in range(8)')
+
+
+@dataclass(frozen=True, slots=True)
 class CliffordGate:
-    """CLIF k q: the single-qubit Clifford with frame k, up to phase.
+    """CLIF k q: the exact single-qubit Clifford Clif(k, phase=0).
 
     Frame k denotes the matrix product P[k % 4] R[k // 4], with
     P = (I, X, Y, Z) and R = (I, H, S, HS, SH, HSH), as for Clif.
@@ -235,11 +248,11 @@ class Request:
 
 
 Record = (
-    CliffordGate | TGate | CZGate | Prepare | Measure | ClassicalOp
+    Phase | CliffordGate | TGate | CZGate | Prepare | Measure | ClassicalOp
     | Discard | Report | Start | End | Request
 )
 _RECORD_TYPES = (
-    CliffordGate, TGate, CZGate, Prepare, Measure, ClassicalOp,
+    Phase, CliffordGate, TGate, CZGate, Prepare, Measure, ClassicalOp,
     Discard, Report, Start, End, Request,
 )
 _CONDITIONAL_GATES = (CliffordGate, TGate, CZGate)
@@ -265,6 +278,8 @@ def _condition_suffix(condition: str | None) -> str:
 
 def _format_record(record: Record) -> str:
     """One line of stream text, without its line feed."""
+    if isinstance(record, Phase):
+        return f'PHASE {record.exponent}'
     if isinstance(record, CliffordGate):
         return (f'CLIF {record.frame} {record.qubit}'
                 f'{_condition_suffix(record.condition)}')
@@ -367,6 +382,11 @@ def _parse_record(line: str) -> Record:
     fields = line.split(' ')
     if '' in fields:
         raise ValueError('fields must be separated by single spaces')
+    if keyword == 'PHASE':
+        if (len(fields) != 2 or len(fields[1]) != 1
+                or fields[1] not in '01234567'):
+            raise ValueError('PHASE takes one exponent from 0 to 7')
+        return Phase(int(fields[1]))
     if keyword in _GATE_QUBIT_COUNTS:
         return _parse_gate(fields)
     if keyword in _CLASSICAL_ARITY:
@@ -406,6 +426,8 @@ def _rename_operation(record: Record, rename: Callable[[str], str]) -> Record:
     def condition(name: str | None) -> str | None:
         return None if name is None else rename(name)
 
+    if isinstance(record, Phase):
+        return record
     if isinstance(record, CliffordGate):
         return CliffordGate(record.frame, rename(record.qubit),
                             condition(record.condition))

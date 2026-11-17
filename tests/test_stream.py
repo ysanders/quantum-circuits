@@ -5,7 +5,7 @@ import unittest
 
 from quantum_circuits.stream import (
     CLASSICAL, QUANTUM, ClassicalOp, CliffordGate, CZGate, Discard, Measure,
-    Port, Prepare, Report, Request, StreamError, TGate,
+    Phase, Port, Prepare, Report, Request, StreamError, TGate,
     assign_digests, check_stream, expand, format_stream, parse_stream,
 )
 
@@ -101,6 +101,7 @@ class TextTests(unittest.TestCase):
 
     def test_parses_each_record_form(self) -> None:
         cases = {
+            'PHASE 3': Phase(3),
             'CLIF 4 t if m': CliffordGate(4, 't', 'm'),
             'T t': TGate('t'),
             'CZ a b if m': CZGate('a', 'b', 'm'),
@@ -118,6 +119,11 @@ class TextTests(unittest.TestCase):
 
     def test_rejects_malformed_text(self) -> None:
         cases = {
+            'phase out of range': 'PHASE 8\n',
+            'negative phase': 'PHASE -1\n',
+            'leading zero in phase': 'PHASE 01\n',
+            'missing phase': 'PHASE\n',
+            'conditional scalar': 'PHASE 1 if m\n',
             'non-ASCII character': 'T é\n',
             'tab': 'T\ta\n',
             'missing final line feed': 'T a',
@@ -140,12 +146,29 @@ class TextTests(unittest.TestCase):
 
     def test_records_reject_booleans_and_non_strings(self) -> None:
         with self.assertRaises(TypeError):
+            Phase(True)
+        with self.assertRaises(TypeError):
+            Phase('1')
+        for exponent in (-1, 8):
+            with self.subTest(exponent=exponent), self.assertRaises(ValueError):
+                Phase(exponent)
+        with self.assertRaises(TypeError):
             CliffordGate(True, 'a')
         with self.assertRaises(TypeError):
             TGate(3)
 
 
 class DigestTests(unittest.TestCase):
+    def test_scalar_definition_digest_includes_phase(self) -> None:
+        text = 'START scalar ()\nPHASE 3\nEND scalar ()\n'
+        self.assertEqual(format_stream(parse_stream(text)), text)
+        program = check_stream(labelled(text))
+        canonical = 'START ()\nPHASE 3\nEND ()\n'
+        expected = 'sha256:' + hashlib.sha256(canonical.encode('ascii')).hexdigest()
+        self.assertEqual(program.root.digest, expected)
+        changed = check_stream(labelled(text.replace('PHASE 3', 'PHASE 4')))
+        self.assertNotEqual(program.root.digest, changed.root.digest)
+
     def test_digest_follows_design_encoding(self) -> None:
         # Written from DESIGN.md: START names become 0, 1, 2; the label is
         # omitted from the definition's own START and END.
@@ -201,6 +224,20 @@ class DigestTests(unittest.TestCase):
 
 
 class ExpandTests(unittest.TestCase):
+    def test_phase_is_preserved_at_every_subcircuit_use(self) -> None:
+        # A scalar definition has no wires. Both its inline first use and
+        # its REQUEST contribute phase; expansion must not count it only once.
+        text = (
+            'START root ()\nSTART scalar ()\nPHASE 3\nEND scalar ()\n'
+            'REQUEST scalar () ()\nPHASE 2\nEND root ()\n')
+        program = check_stream(labelled(text))
+        flat = expand(program)
+        self.assertEqual(flat.inputs, ())
+        self.assertEqual(flat.outputs, ())
+        self.assertEqual(flat.operations, (Phase(3), Phase(3), Phase(2)))
+        changed = check_stream(labelled(text.replace('PHASE 3', 'PHASE 4')))
+        self.assertNotEqual(program.root.digest, changed.root.digest)
+
     def test_expands_design_example(self) -> None:
         flat = expand(check_stream(labelled(DESIGN_EXAMPLE)))
         self.assertEqual(flat.inputs, tuple(q(str(index)) for index in range(5)))
