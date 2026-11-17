@@ -4,12 +4,12 @@
 
 This library is a lowering target for the author's quantum compiler. Its
 job is to manage memory while a consumer iterates through a hierarchically
-constructed circuit. Each subcircuit definition is stored once and shared
-across uses on different registers. A consumer walks the circuit from the
-root definition and descends into any definition it does not recognise.
-An extractor for Qualtran, Cirq, Qiskit or another library stops at
-operations its target provides. The author need not choose a target
-library.
+constructed circuit. A circuit can use other circuits as subcircuits. Each
+subcircuit is stored once, however often it is used, and each use binds its
+ports to the caller's wires. A consumer walks the circuit from the root and
+descends into any subcircuit it does not recognise. An extractor for
+Qualtran, Cirq, Qiskit or another library stops at operations its target
+provides. The author need not choose a target library.
 
 The library's circuit types are an abstraction over the [stream](#stream)
 language. Every circuit they build lowers to a stream, which fixes its
@@ -19,7 +19,7 @@ cannot yet express is a gap to close.
 The scope has three parts:
 
 - **Circuit construction:** operations, wiring, preparation, measurement
-  and shared subcircuit definitions.
+  and subcircuits.
 - **Rotation synthesis:** approximate a specified single-qubit rotation to
   a requested accuracy using Clifford+T gates.
 - **Coherent arithmetic:** construct additions, multiplications and
@@ -32,7 +32,7 @@ see [README.md](README.md). Subcircuits, classical data and the
 constructors below are planned.
 
 [Arithmetic example](#arithmetic-example) · [Circuit representation](#circuit-representation) ·
-[Shared subcircuits](#shared-subcircuits) · [Stream](#stream) ·
+[Subcircuits](#subcircuits) · [Stream](#stream) ·
 [Equality and hashing](#equality-and-hashing) ·
 [Example: CCZ](#example-ccz) · [External tools](#external-tools) ·
 [Implementation order](#implementation-order)
@@ -124,9 +124,7 @@ basis; other preparations and measurements are circuits built from them.
 H after preparation produces `|+>`; H before Z measurement gives X
 measurement.
 
-Construction records a symbolic result and its dependencies without
-sampling an outcome. Preparation and measurement are separate from the
-unitary `WireOp` algebra.
+Preparation and measurement are separate from the unitary `WireOp` algebra.
 
 ### Boundaries and validity
 
@@ -134,36 +132,32 @@ A circuit has separate ordered input and output boundaries, with quantum
 or classical ports. Preparation and measurement allow these boundaries
 to differ in size and type.
 
-The operation graph is a finite directed acyclic graph (DAG). Every quantum
-port has exactly one edge: quantum values cannot branch or vanish
-implicitly. Classical results may have several consumers. Both kinds of
-dependency must be acyclic.
-
-The graph records event order along each wire as well as which wires meet.
+A circuit records event order along each wire as well as which wires meet.
 Storage order and internal names have no mathematical meaning. Exact unitary
 semantics includes boundary order and overall phase.
 
 Validity concerns connections, not simplification. Two consecutive equal
 CZs form a valid circuit; cancelling them is a transformation.
 
-## Shared subcircuits
+## Subcircuits
 
-A definition contains a body with ordered local ports. Each occurrence
-binds those ports to wires in its surrounding circuit. For example, a
-three-qubit body's ports 0, 1 and 2 can bind to (a, b, c) in one use and
-(x, y, z) in another. Both uses share the definition; caller names belong
-to the occurrences.
+A subcircuit is a circuit used inside another. It has ordered ports, and
+each use binds them to wires of the calling circuit. For example, a
+three-qubit subcircuit's ports 0, 1 and 2 can bind to wires (a, b, c) in one
+use and (x, y, z) in another. Both uses refer to the one stored subcircuit;
+the wire names belong to the uses. The stream calls a stored subcircuit a
+definition.
 
-Expansion creates fresh internal occurrences and reconnects the boundary
-through each binding. A definition used twice must never join the
-internal wires of the two uses.
+Expansion copies a subcircuit's body for each use, with fresh internal
+wires, and connects its ports through that use's binding. Two uses of one
+subcircuit never share internal wires.
 
-Definitions form a second DAG, whose edges refer to child definitions.
-It resembles a parse tree over the operations, with repeated subcircuits
-shared. Recursive definitions are excluded.
+Subcircuits form a directed acyclic graph (DAG) whose edges point from a
+circuit to the subcircuits it uses. It resembles a parse tree over the
+operations, with repeated subcircuits stored once. Recursion is excluded.
 
-Tools can inspect, translate or summarise each definition once. Gate
-counting can multiply a child's count by its number of uses. Explicit
+Tools can inspect, translate or summarise each subcircuit once. Gate
+counting can multiply a subcircuit's count by its number of uses. Explicit
 expansion remains available when a task needs elementary operations.
 
 ## Stream
@@ -287,7 +281,7 @@ Local ports allow reuse on different caller wires while preserving
 argument roles. A further goal is to give fragments the same canonical
 body and digest when they differ only by a permutation of qubit indices.
 Canonicalisation must retain the boundary permutations needed to reconnect
-each occurrence correctly. It need not delay circuit construction.
+each use correctly. It need not delay circuit construction.
 
 The [stream](#stream) gives a digest's encoding. Child digests enter a
 parent's, forming a Merkle DAG. Python's `hash()` is not a persistent
@@ -369,8 +363,8 @@ These notes summarise public code and papers examined on 16 and 17 November
 Rottnest divides a circuit into pieces called widgets that fit a machine
 register. Cabaliser translates each into a graph state, local Clifford
 operations and measurements. A graph state is prepared from `|+>` qubits
-by applying CZ along its graph's edges. This graph describes a state;
-it is distinct from this library's operation DAG.
+by applying CZ along its graph's edges. This graph describes a state; it
+is distinct from the wires and CZs of this library's circuits.
 
 Later stages handle layout, scheduling, magic states and code distance.
 See [Nguyen et al., Section V](https://arxiv.org/abs/2509.13546) for the
@@ -405,9 +399,9 @@ Sources: [Cabaliser](https://github.com/QSI-BAQS/cabaliser) (`9bc6ed1`),
 
 ### Library boundary
 
-Consumers read the stream or inspect definitions directly: ordered ports,
-operations, measurement dependencies and child bindings, without expanding
-every occurrence. An adapter translates either into its consumer's format,
+Consumers read the stream or inspect circuits directly: ordered ports,
+operations and the bindings of their subcircuits, without expanding every
+use. An adapter translates either into its consumer's format,
 decomposition and call boundaries.
 
 The library keeps exact phase; the stream omits it. Any further omission

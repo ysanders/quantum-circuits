@@ -25,8 +25,7 @@ preparing `|0>` and end with a measurement in the computational basis.
 format that fixes what a circuit means.
 
 Circuits cannot use subcircuits yet, and there is no rotation synthesiser
-or arithmetic API. The older circuit prototype remains in Git
-history.
+or arithmetic API. The older circuit prototype remains in Git history.
 
 The package and its tests use only the Python standard library.
 

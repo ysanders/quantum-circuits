@@ -8,13 +8,12 @@ This file gives instructions for changing the repository.
 
 Build a small Python library that serves as a lowering target for the
 author's quantum compiler. It must construct, inspect and manipulate
-circuits, sharing subcircuit definitions across uses on different
-registers.
+circuits.
 
 The intended scope is:
 
-- Circuit representation and construction, including circuits that use
-  other circuits as subcircuits.
+- Circuit representation and construction, including subcircuits: a
+  circuit stored once and used by other circuits on different wires.
 - Rotation synthesis: approximate a specified single-qubit rotation to a
   requested accuracy using Clifford+T gates.
 - Coherent arithmetic constructors, including polynomial evaluation on
@@ -36,9 +35,8 @@ constructors are planned. The circuit types abstract over the stream
 language; DESIGN.md lists what they cannot yet express.
 
 Next let circuits use subcircuits, each use binding a subcircuit's ports to
-wires. Measurement destroys its wire. DESIGN.md's stream section covers
-classical outcomes. The old graph and arithmetic recipes in Git history are
-references, not requirements for the new model.
+wires. The old graph and arithmetic recipes in Git history are references,
+not requirements for the new model.
 
 ## Working rules
 
@@ -48,8 +46,8 @@ references, not requirements for the new model.
   intent is unclear. Do not turn an assumption into a design premise.
 - Explain and settle design departures and open questions before
   implementing them. Routine work within agreed scope needs no approval.
-- Use ordered local ports and explicit occurrence bindings. Caller wire
-  names must not enter a definition's identity.
+- Give subcircuits ordered ports and bind them explicitly at each use.
+  Caller wire names must not enter a subcircuit's identity.
 - Preserve exact unitary phase, boundary order and measurement dependencies.
 - Separate graph validity from simplification. Do not restore the old
   normalisation requirements as validity rules.
