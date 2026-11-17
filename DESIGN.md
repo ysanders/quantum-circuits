@@ -21,11 +21,12 @@ The scope has three parts:
   polynomial evaluations on quantum registers. Python builds the circuit;
   the quantum computer performs the arithmetic.
 
-Only exact single-qubit Clifford+T algebra is implemented today; see
-[README.md](README.md). The circuit model and constructors below are planned.
+Exact single-qubit Clifford+T algebra and the stream are implemented today;
+see [README.md](README.md). The circuit model and constructors below are
+planned.
 
 [Arithmetic example](#arithmetic-example) · [Circuit representation](#circuit-representation) ·
-[Shared subcircuits](#shared-subcircuits) · [Stream (proposal)](#stream-proposal) ·
+[Shared subcircuits](#shared-subcircuits) · [Stream](#stream) ·
 [Equality and hashing](#equality-and-hashing) ·
 [Example: CCZ](#example-ccz) · [External tools](#external-tools) ·
 [Implementation order](#implementation-order)
@@ -66,8 +67,7 @@ A circuit means a time-ordered sequence of primitive operations on
 addressed qubits. The primitives are single-qubit Clifford gates, T, CZ on
 two distinct qubits, and single-qubit preparation and measurement in the
 computational basis. Physical placement, routing and scheduling belong to
-external consumers. The [stream proposal](#stream-proposal) makes this
-sequence precise.
+external consumers. The [stream](#stream) makes this sequence precise.
 
 The library stores a circuit under a programming discipline: wires that
 intersect pairwise. The discipline is a convenience; the sequence defines
@@ -144,11 +144,17 @@ Tools can inspect, translate or summarise each definition once. Gate
 counting can multiply a child's count by its number of uses. Explicit
 expansion remains available when a task needs elementary operations.
 
-## Stream (proposal)
+## Stream
 
 The stream fixes what a circuit means. It writes a circuit as records in
 time order, one per line, in 7-bit ASCII. Emitting it to consumers is a
-secondary use. The record syntax below is illustrative.
+secondary use.
+
+Fields are separated by single spaces, and every line, including the last,
+ends with a line feed. A name is a nonempty string of ASCII letters, digits
+and underscores. A label is printable ASCII without spaces or parentheses.
+A name list is written in parentheses, with each entry `q:name` for a
+quantum name or `c:name` for a classical one.
 
 ### Records
 
@@ -179,8 +185,7 @@ Definitions:
 The stream is one definition, the root. A definition's first use appears
 inline between `START` and `END`; later uses are `REQUEST` records.
 `START` and `END` nest and match by `d`. No `d` opens twice, and a
-`REQUEST` follows its definition's `END`, which excludes recursion. Name
-lists mark each name as quantum or classical.
+`REQUEST` follows its definition's `END`, which excludes recursion.
 
 ### Names
 
@@ -206,11 +211,11 @@ lists mark each name as quantum or classical.
 ### Digests
 
 A definition's label `d` is its digest: `sha256:` followed by the SHA-256
-of the definition's records, with `d` omitted from its own `START` and
-`END`. Before hashing, `START` names become their
-positions 0, 1, 2 and so on; introduced names continue the count in order
-of introduction. Each nested `START ... END` block becomes the `REQUEST`
-record for that use.
+of the definition's records as stream text, with `d` omitted from its own
+`START` and `END`. Before hashing, `START` names become their positions 0,
+1, 2 and so on; introduced names continue the count in order of
+introduction. Each nested `START ... END` block becomes the `REQUEST` record
+for that use.
 
 The digest depends on record order. Library normalisation makes equal
 constructions emit equal records. Equal digests then identify a definition
@@ -225,13 +230,14 @@ is the circuit. A condition decides whether a gate acts, never which record
 comes next. The stream carries no global phase; the library keeps phase for
 upstream use.
 
-This library will provide a checker for these rules and an expander for
-this meaning.
+`quantum_circuits.stream` checks these rules and computes this meaning;
+[README.md](README.md#the-stream) documents it.
 
 ### Example
 
 Measurement-based uncomputation of AND, used twice. The inputs `t` and `u`
-hold `a AND b` and `b AND c`. Angle brackets stand for digests.
+hold `a AND b` and `b AND c`. Labels in angle brackets are placeholders,
+which `assign_digests` replaces with digests.
 
 ```text
 START <root> (q:a q:b q:c q:t q:u)
@@ -261,8 +267,8 @@ body and digest when they differ only by a permutation of qubit indices.
 Canonicalisation must retain the boundary permutations needed to reconnect
 each occurrence correctly. It need not delay circuit construction.
 
-The [stream proposal](#stream-proposal) gives a digest's encoding. Child
-digests enter a parent's, forming a Merkle DAG. Python's `hash()` is not a
+The [stream](#stream) gives a digest's encoding. Child digests enter a
+parent's, forming a Merkle DAG. Python's `hash()` is not a
 persistent identifier,
 and a topological traversal does not provide canonical graph labelling.
 

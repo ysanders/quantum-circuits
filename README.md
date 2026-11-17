@@ -17,6 +17,9 @@ will label wire segments: composition, inverses, integer powers and H/S/T
 output with the minimum T count. Operators have unique stored forms,
 including phase, for exact equality and hashing.
 
+It also provides `quantum_circuits.stream`, which parses, checks and expands
+the stream: the text format that fixes what a circuit means.
+
 There is no circuit type, rotation synthesiser or arithmetic API yet. The
 older circuit prototype remains in Git history.
 
@@ -117,6 +120,51 @@ Its fields `frame`, `phase`, `rep` and `pauli` are read-only. Equality and
 hashing include the phase. `repr` gives Python code that evaluates to the
 value.
 
+### The stream
+
+`quantum_circuits.stream` reads, checks and expands the text format in
+[DESIGN.md](DESIGN.md#stream). The package does not re-export it.
+
+- `parse_stream(text)` turns stream text into a tuple of records. It checks
+  the format, not the rules.
+- `format_stream(records)` writes records as stream text.
+- `assign_digests(records)` replaces placeholder labels with digests and
+  checks every other rule.
+- `check_stream(records)` checks every rule, including that each label is
+  its definition's digest. It returns a `Program`, which holds each
+  `Definition` in canonical form, in the order they end, root last.
+- `expand(program)` replaces every use by its definition's body. It returns
+  a `FlatCircuit` of operation records, named 0, 1, 2 and so on.
+
+A stream that breaks the format or a rule raises `StreamError`, a
+`ValueError` that names the offending line or record. Records are frozen
+dataclasses: `CliffordGate`, `TGate`, `CZGate`, `Prepare`, `Measure`,
+`ClassicalOp`, `Discard`, `Report`, `Start`, `End` and `Request`. Name lists
+hold `Port(kind, name)` values, with kind `QUANTUM` (`'q'`) or `CLASSICAL`
+(`'c'`).
+
+```python
+from quantum_circuits.stream import (
+    assign_digests, check_stream, expand, format_stream, parse_stream,
+)
+
+text = (
+    "START <root> (q:x)\n"
+    "START <work> (q:x)\n"
+    "PREP w\n"
+    "CZ x w\n"
+    "MEAS w\n"
+    "DISCARD w\n"
+    "END <work> (q:x)\n"
+    "REQUEST <work> (q:x) (q:x)\n"
+    "END <root> (q:x)\n"
+)
+program = check_stream(assign_digests(parse_stream(text)))
+assert len(program.definitions) == 2
+flat = expand(program)
+assert format_stream(flat.operations).splitlines()[4:6] == ["PREP 2", "CZ 0 2"]
+```
+
 ## Development
 
 Use Python 3.10 or later. Run these from the project root.
@@ -143,6 +191,9 @@ python3 -m pip install -e .
   and reduction of a long word without recursion.
 - The CCZ body in DESIGN.md against its exact definition, in
   `tests/test_ccz.py`.
+- The stream in `tests/test_stream.py`: text round trips, a digest computed
+  independently from DESIGN.md's encoding, digests that ignore names,
+  expansion with fresh names, and one stream breaking each rule.
 
 The exact matrix reference shares basic scalar arithmetic with the table
 generator, but uses neither runtime tables nor reduction code. A separate
@@ -170,9 +221,11 @@ search.
 | `quantum_circuits/clifford.py` | Exact Clifford values and their products |
 | `quantum_circuits/operators.py` | Exact Clifford+T values, their reduction, and their output as gates |
 | `quantum_circuits/_clifford_tables.py` | The generated finite tables |
+| `quantum_circuits/stream.py` | Stream records, text, checker, digests and expansion |
 | `tools/generate_clifford_tables.py` | The exact, reproducible table generator |
 | `tests/test_clifford.py`, `tests/test_operators.py` | Tests of the algebra and the public interface |
 | `tests/test_ccz.py` | The CCZ body as data, checked exactly |
+| `tests/test_stream.py` | Tests of the stream format, rules and expansion |
 | `tests/exact_reference.py`, `tests/reference.py` | The exact and the numerical reference matrices |
 | `examples/basic.py` | A runnable example of the algebra on one qubit |
-| `DESIGN.md` | Purpose, planned circuit model, arithmetic use case and external-tool context |
+| `DESIGN.md` | Purpose, planned circuit model, the stream, arithmetic use case and external-tool context |

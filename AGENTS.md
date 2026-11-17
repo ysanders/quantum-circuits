@@ -26,14 +26,15 @@ determine this library's mathematical model.
 
 ## Current state and next work
 
-Only exact single-qubit Clifford+T algebra exists. The public exports are
-`Clif`, `WireOp`, `op`, `I`, `X`, `Y`, `Z`, `H`, `S` and `T`.
+Exact single-qubit Clifford+T algebra and the stream module exist. The
+package exports `Clif`, `WireOp`, `op`, `I`, `X`, `Y`, `Z`, `H`, `S` and
+`T`; `quantum_circuits.stream` has its own exports.
 Circuit types, rotation synthesis and arithmetic constructors are planned.
 
 Next add single-qubit preparation and measurement, then wire intersections.
-Measurement destroys its wire. The stream proposal in DESIGN.md covers
-classical outcomes. The old graph and arithmetic recipes in Git history
-are references, not requirements for the new model.
+Measurement destroys its wire. DESIGN.md's stream section covers classical
+outcomes. The old graph and arithmetic recipes in Git history are
+references, not requirements for the new model.
 
 ## Working rules
 
