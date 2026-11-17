@@ -1,7 +1,7 @@
 """Tests for circuits whose wires meet at CZ vertices.
 
 tests/test_ccz.py checks a full body exactly; these tests check the
-builder's rules, the canonical vertex order, boundaries and streams.
+builder's rules, the stored CZ order, boundaries and streams.
 """
 
 import unittest
@@ -80,7 +80,7 @@ class BuilderTests(unittest.TestCase):
             builder.apply('H', 0)
 
 
-class CanonicalOrderTests(unittest.TestCase):
+class StoredOrderTests(unittest.TestCase):
     def test_order_of_commuting_vertices_does_not_matter(self) -> None:
         first = disjoint_pairs((0, 1), (2, 3))
         second = disjoint_pairs((2, 3), (0, 1))
@@ -104,7 +104,7 @@ class CanonicalOrderTests(unittest.TestCase):
         # (0, 1) follows (1, 2) on wire 1, despite its smaller pair.
         self.assertEqual(builder.build().vertices, ((1, 2), (0, 1)))
 
-    def test_constructor_requires_canonical_order(self) -> None:
+    def test_constructor_requires_stored_order(self) -> None:
         segments = ((I, I), (I, I), (I, I), (I, I))
         Circuit(segments, ((0, 1), (2, 3)))
         with self.assertRaises(ValueError):

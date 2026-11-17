@@ -22,7 +22,7 @@ A `Circuit` holds wires that meet at CZ vertices. A wire can start by
 preparing `|0>` and end with a measurement in the computational basis.
 
 `quantum_circuits.stream` parses, checks and expands the stream: the text
-format that fixes what a circuit means.
+format that gives a circuit's operational semantics.
 
 Circuits cannot use subcircuits yet, and there is no rotation synthesiser
 or arithmetic API. The older circuit prototype remains in Git history.
@@ -145,7 +145,7 @@ output port, in wire order, which is classical if the wire was measured.
 `inputs` and `outputs` give the port kinds.
 
 `vertices` are stored in a fixed time order, described in
-[DESIGN.md](DESIGN.md#one-qubit-processing-and-intersections), so circuits
+[DESIGN.md](DESIGN.md#segments-and-cz-vertices), so circuits
 that differ only in the order of commuting CZs are equal.
 `to_stream(names=None)` gives the circuit as a checked stream, with wires
 named `q0`, `q1` and so on unless `names` is given. The stream drops global

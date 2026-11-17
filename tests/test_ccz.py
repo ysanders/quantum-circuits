@@ -22,10 +22,10 @@ T_INVERSE = T ** -1
 # in an order consistent with every wire.
 VERTICES = ((B, C), (A, C), (B, C), (A, C), (A, B), (A, B))
 
-# EDGE_LABELS[wire] lists the operator on each edge of that wire: from the
+# SEGMENTS[wire] lists the operator on each segment of that wire: from the
 # input to its first vertex, between consecutive vertices, and from its last
 # vertex to the output. Words are in execution order.
-EDGE_LABELS = (
+SEGMENTS = (
     (I, I, I, T, I),
     (I, I, op('TH'), op('H', T_INVERSE, 'H'), H),
     (H, op('H', T_INVERSE, 'H'), op('HTH'), op('H', T_INVERSE, 'H'), op('HT')),
@@ -131,7 +131,7 @@ class CCZBodyTests(unittest.TestCase):
     def test_builder_gives_design_table(self) -> None:
         circuit = build_ccz_body()
         self.assertEqual(circuit.vertices, VERTICES)
-        self.assertEqual(circuit.segments, EDGE_LABELS)
+        self.assertEqual(circuit.segments, SEGMENTS)
 
     def test_shape(self) -> None:
         circuit = build_ccz_body()

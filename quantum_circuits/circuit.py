@@ -6,7 +6,8 @@ exact WireOp applied there. The events are CZ vertices, each joining two
 distinct wires. A wire starts at an input port or by preparing |0>, and ends
 at an output port or with a measurement in the computational basis.
 
-The stream from to_stream fixes what a circuit means (DESIGN.md, Stream).
+The stream from to_stream gives a circuit's operational semantics
+(DESIGN.md, Stream).
 """
 
 from __future__ import annotations
@@ -60,7 +61,7 @@ def lower_operator(operator: WireOp, qubit: str) -> tuple[Record, ...]:
 Pair = tuple[int, int]
 
 
-def _canonical_order(wire_count: int, vertices: tuple[Pair, ...]) -> tuple[Pair, ...]:
+def _stored_order(wire_count: int, vertices: tuple[Pair, ...]) -> tuple[Pair, ...]:
     """Put CZ vertices, given in any valid time order, into the stored order.
 
     CZs on disjoint wires can be applied in either order with the same
@@ -120,13 +121,14 @@ class Circuit:
 
     segments[w] lists wire w's operators in execution order; it has one
     more entry than the number of vertices on wire w. vertices lists the
-    CZ vertices as wire pairs (a, b) with a < b, in canonical time order.
+    CZ vertices as wire pairs (a, b) with a < b, in stored order (see
+    _stored_order and DESIGN.md).
     Wires in prepared start by preparing |0>; the others start at input
     ports, in wire order. Wires in measured end with a measurement; every
     wire ends at an output port, quantum or classical, in wire order.
 
-    Build circuits with CircuitBuilder, which puts vertices in canonical
-    order. The constructor rejects any other order.
+    Build circuits with CircuitBuilder, which puts vertices in stored order.
+    The constructor rejects any other order.
     """
 
     segments: tuple[tuple[WireOp, ...], ...]
@@ -162,9 +164,9 @@ class Circuit:
                 raise ValueError(
                     f'wire {wire} meets {count} vertices, so it needs {count + 1} '
                     f'segments, not {len(self.segments[wire])}')
-        if _canonical_order(wire_count, self.vertices) != self.vertices:
+        if _stored_order(wire_count, self.vertices) != self.vertices:
             raise ValueError(
-                'vertices must be in canonical time order; build with CircuitBuilder')
+                'vertices are not in stored order; build with CircuitBuilder')
         _check_wire_set(self.prepared, wire_count, 'prepared')
         _check_wire_set(self.measured, wire_count, 'measured')
 
@@ -195,9 +197,10 @@ class Circuit:
         """This circuit as a checked stream: one root definition.
 
         names gives each wire's stream name; the default is q0, q1, and so
-        on. Names do not enter the digest. The stream carries no global phase.
+        on. Names do not enter the digest. The stream does not specify
+        global phase.
 
-        Records follow the canonical vertex order. For each vertex, the
+        Records follow the stored vertex order. For each vertex, the
         segments that end there come first, its lower wire's then its upper
         wire's, then the CZ. The final segments follow in wire order, each
         with its measurement. A prepared wire's PREP precedes its first
@@ -298,6 +301,6 @@ class CircuitBuilder:
             tuple(finished) + (pending,)
             for finished, pending in zip(self._finished, self._pending)
         )
-        vertices = _canonical_order(len(segments), tuple(self._vertices))
+        vertices = _stored_order(len(segments), tuple(self._vertices))
         return Circuit(segments, vertices, frozenset(self._prepared),
                        frozenset(self._measured))

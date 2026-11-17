@@ -12,9 +12,12 @@ Qualtran, Cirq, Qiskit or another library stops at operations its target
 provides. The author need not choose a target library.
 
 The library's circuit types are an abstraction over the [stream](#stream)
-language. Every circuit they build lowers to a stream, which fixes its
-meaning. They should express everything the stream can; anything they
-cannot yet express is a gap to close.
+language. Every circuit they build lowers to a stream. The stream gives a
+circuit's operational semantics: a program of primitive operations in time
+order, which does not specify global phase. A circuit gives its
+denotational semantics: the exact operation it implements, with one global
+phase. The circuit types should express everything the stream can; anything
+they cannot yet express is a gap to close.
 
 The scope has three parts:
 
@@ -35,7 +38,7 @@ constructors below are planned.
 [Subcircuits](#subcircuits) · [Stream](#stream) ·
 [Equality and hashing](#equality-and-hashing) ·
 [Example: CCZ](#example-ccz) · [External tools](#external-tools) ·
-[Implementation order](#implementation-order)
+[Implementation order](#implementation-order) · [To Do](#to-do)
 
 ## Arithmetic example
 
@@ -69,26 +72,24 @@ rotation is approximate.
 
 ## Circuit representation
 
-A circuit means a time-ordered sequence of primitive operations on
-addressed qubits. The primitives are single-qubit Clifford gates, T, CZ on
-two distinct qubits, and single-qubit preparation and measurement in the
+The primitive operations are single-qubit Clifford gates, T, CZ on two
+distinct qubits, and single-qubit preparation and measurement in the
 computational basis. Physical placement, routing and scheduling belong to
-external consumers. The [stream](#stream) makes this sequence precise.
+external consumers.
 
-The library stores a circuit under a programming discipline: wires that
-intersect pairwise. The discipline is a convenience; the sequence defines
-the circuit.
+The library stores a circuit as wires that meet in pairs at CZ. Lowering
+turns this stored form into the [stream](#stream)'s sequence of
+operations.
 
-### One-qubit processing and intersections
+### Segments and CZ vertices
 
-Each segment of wire, between two intersections or between an intersection
-and a boundary port, carries a `WireOp`: the exact product of its Clifford+T
-gates. Combining consecutive one-qubit operations uses the existing algebra.
-In the stream, a segment lowers to CLIF and T records in alternation, with
-at most one CLIF between consecutive T gates.
+A segment is a stretch of wire between two CZ vertices, or between a vertex
+and an end of the wire. Each segment carries a `WireOp`: the exact product
+of its Clifford+T gates. Combining consecutive one-qubit operations uses
+the existing algebra. In the stream, a segment lowers to CLIF and T records
+in alternation, with at most one CLIF between consecutive T gates.
 
-An intersection joins wires at an operation. The only elementary unitary
-intersection is CZ on two distinct wires:
+Wires meet only at CZ, which acts on two distinct wires:
 
 ```text
 CZ |a,b> = (-1)**(a*b) |a,b>
@@ -98,8 +99,8 @@ CZ is symmetric in its arguments. Larger operations have bodies built from
 CZ and one-qubit processing. An operation's definition is independent of
 its chosen body, as the CCZ example below shows.
 
-Intersections are vertices; stretches of wire are labelled edges. A
-one-wire unitary circuit can be a labelled edge alone.
+In the stored form, each CZ is a vertex where two wires meet. A one-wire
+circuit with no CZ has a single segment.
 
 `Circuit` stores each wire's segments in order and each CZ as the pair of
 wires it joins. CZs on disjoint wires can be applied in either order with
@@ -133,8 +134,10 @@ or classical ports. Preparation and measurement allow these boundaries
 to differ in size and type.
 
 A circuit records event order along each wire as well as which wires meet.
-Storage order and internal names have no mathematical meaning. Exact unitary
-semantics includes boundary order and overall phase.
+Storage order and internal names have no mathematical meaning. A circuit's
+denotation includes its boundary order and its one global phase. `Circuit`
+now stores a phase on every segment, and their product is that global
+phase; see [To Do](#to-do).
 
 Validity concerns connections, not simplification. Two consecutive equal
 CZs form a valid circuit; cancelling them is a transformation.
@@ -148,12 +151,16 @@ use and (x, y, z) in another. Both uses refer to the one stored subcircuit;
 the wire names belong to the uses. The stream calls a stored subcircuit a
 definition.
 
+A circuit's outputs follow its wire order. A use can reorder wires through
+its binding: the bit reversal that follows the quantum Fourier transform in
+phase estimation is one example.
+
 Expansion copies a subcircuit's body for each use, with fresh internal
 wires, and connects its ports through that use's binding. Two uses of one
 subcircuit never share internal wires.
 
-Subcircuits form a directed acyclic graph (DAG) whose edges point from a
-circuit to the subcircuits it uses. It resembles a parse tree over the
+Subcircuits form a directed acyclic graph (DAG) in which each circuit
+points to the subcircuits it uses. It resembles a parse tree over the
 operations, with repeated subcircuits stored once. Recursion is excluded.
 
 Tools can inspect, translate or summarise each subcircuit once. Gate
@@ -162,9 +169,9 @@ expansion remains available when a task needs elementary operations.
 
 ## Stream
 
-The stream fixes what a circuit means. It writes a circuit as records in
-time order, one per line, in 7-bit ASCII. Emitting it to consumers is a
-secondary use.
+The stream gives a circuit's operational semantics. It writes a circuit as
+records in time order, one per line, in 7-bit ASCII. Emitting it to
+consumers is a secondary use.
 
 Fields are separated by single spaces, and every line, including the last,
 ends with a line feed. A name is a nonempty string of ASCII letters, digits
@@ -233,6 +240,7 @@ of the definition's records as stream text, with `d` omitted from its own
 introduction. Each nested `START ... END` block becomes the `REQUEST` record
 for that use.
 
+SHA-256 is provisional, pending a hash function designed for this purpose.
 The digest depends on record order. Library normalisation makes equal
 constructions emit equal records. Equal digests then identify a definition
 across streams, as a standard library needs. For now a stream contains
@@ -243,8 +251,8 @@ every definition it uses; linking against a library can come later.
 Replacing each `REQUEST` by its definition's body, with ports rebound and
 internal names made fresh, gives a flat straight-line program. That program
 is the circuit. A condition decides whether a gate acts, never which record
-comes next. The stream carries no global phase; the library keeps phase for
-upstream use.
+comes next. The stream does not specify global phase; each circuit carries
+one.
 
 `quantum_circuits.stream` checks these rules and computes this meaning;
 [README.md](README.md#the-stream) documents it.
@@ -305,9 +313,9 @@ vertex   0     1     2     3     4     5
 wires    b,c   a,c   b,c   a,c   a,b   a,b
 ```
 
-Each wire meets four vertices and has five edges: one from the input,
-three between vertices and one to the output. Their labels are gate words
-in execution order:
+Each wire meets four vertices and has five segments: one from the input,
+three between vertices and one to the output. Their operators are gate
+words in execution order:
 
 ```text
 a:   I    I           I        T           I
@@ -315,7 +323,7 @@ b:   I    I           T H      H T^-1 H    H
 c:   H    H T^-1 H    H T H    H T^-1 H    H T
 ```
 
-Seven edges carry one T or T^-1 each. [tests/test_ccz.py](tests/test_ccz.py)
+Seven segments carry one T or T^-1 each. [tests/test_ccz.py](tests/test_ccz.py)
 builds this body with `CircuitBuilder` and checks it against CCZ on all
 eight basis states, exactly and with phase included. It also checks the
 body's stream, up to global phase.
@@ -423,3 +431,17 @@ exactly. The remaining work on circuits closes the gaps between what
 Rotation synthesis and coherent arithmetic constructors then supply the
 higher-level operations. General equivalence machinery, permutation
 canonicalisation and adapters can follow as needed.
+
+## To Do
+
+- **One phase per circuit.** Store a single global phase in `Circuit`,
+  with unphased segments, so that circuits differing only in where phase
+  sits compare equal.
+- **Digest hash.** Replace SHA-256 with a hash function designed for this
+  purpose.
+- **Stream rule tests.** Match each rule-breaking stream in
+  `tests/test_stream.py` to the error for the rule it breaks. A case that
+  fails for an incidental reason now passes unnoticed.
+- **Stream module.** Give `quantum_circuits/stream.py` another design pass.
+  At 791 lines it is longer than the algebra modules together, generated
+  tables included; text, checking and expansion could be separate modules.
