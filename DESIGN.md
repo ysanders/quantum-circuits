@@ -21,9 +21,10 @@ The scope has three parts:
   polynomial evaluations on quantum registers. Python builds the circuit;
   the quantum computer performs the arithmetic.
 
-Exact single-qubit Clifford+T algebra and the stream are implemented today;
-see [README.md](README.md). The circuit model and constructors below are
-planned.
+Exact single-qubit Clifford+T algebra, one-wire circuits with preparation
+and measurement, and the stream are implemented today; see
+[README.md](README.md). The rest of the circuit model and the constructors
+below are planned.
 
 [Arithmetic example](#arithmetic-example) · [Circuit representation](#circuit-representation) ·
 [Shared subcircuits](#shared-subcircuits) · [Stream](#stream) ·
@@ -78,6 +79,8 @@ the circuit.
 Each segment of wire, between two intersections or between an intersection
 and a boundary port, carries a `WireOp`: the exact product of its Clifford+T
 gates. Combining consecutive one-qubit operations uses the existing algebra.
+In the stream, a segment lowers to CLIF and T records in alternation, with
+at most one CLIF between consecutive T gates.
 
 An intersection joins wires at an operation. The only elementary unitary
 intersection is CZ on two distinct wires:
@@ -104,7 +107,8 @@ measurement.
 
 Construction records a symbolic result and its dependencies without
 sampling an outcome. Preparation and measurement are separate from the
-unitary `WireOp` algebra.
+unitary `WireOp` algebra. `Wire` implements the one-wire case: an input
+port or a preparation, a `WireOp`, then an output port or a measurement.
 
 ### Boundaries and validity
 
@@ -391,10 +395,9 @@ consumer limitations. No adapter is implemented yet.
 
 ## Implementation order
 
-First add single-qubit preparation and measurement, settling their contracts
-and composition with the existing algebra. Then introduce intersections
-through explicit ports, starting with CZ. Represent the CCZ body above and
-reuse its independent exact check.
+Preparation and measurement exist for one wire. Next introduce
+intersections through explicit ports, starting with CZ. Represent the CCZ
+body above and reuse its independent exact check.
 
 Shared definitions and bindings build on this structure. Rotation synthesis
 and coherent arithmetic constructors supply the higher-level operations.

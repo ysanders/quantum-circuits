@@ -1,8 +1,14 @@
-"""Canonical exact single-qubit Clifford+T algebra; standard library only."""
+"""Exact single-qubit Clifford+T algebra and one-wire circuits.
+
+quantum_circuits.stream defines the stream that fixes what a circuit means.
+Standard library only.
+"""
 
 from .clifford import Clif
 from .operators import H, I, S, T, X, Y, Z, WireOp, op
+from .wire import MEASURE, PREPARE, Wire
 
 __all__ = [
     'Clif', 'WireOp', 'op', 'I', 'X', 'Y', 'Z', 'H', 'S', 'T',
+    'Wire', 'PREPARE', 'MEASURE',
 ]
