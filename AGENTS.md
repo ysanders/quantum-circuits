@@ -21,16 +21,15 @@ The intended scope is:
   performs the arithmetic.
 
 Physical layout, scheduling and machine resource estimation belong to
-external tools. Their authors write adapters; backend requirements do not
-determine this library's mathematical model.
+external tools. Their teams decide whether and how to read the stream;
+backend requirements do not determine this library's mathematical model.
 
 ## Current state and next work
 
-Exact single-qubit Clifford+T algebra, one-wire circuits, circuits of
-wires that intersect at CZ, and the stream module exist. The package
-exports `Clif`, `WireOp`, `op`, `I`, `X`, `Y`, `Z`, `H`, `S`, `T`, `Wire`,
-`PREPARE`, `MEASURE`, `Circuit` and `CircuitBuilder`;
-`quantum_circuits.wire` and `quantum_circuits.stream` have their own
+Exact single-qubit Clifford+T algebra, circuits of wires that intersect at
+CZ, and the stream module exist. The package exports `Clif`, `WireOp`,
+`op`, `I`, `X`, `Y`, `Z`, `H`, `S`, `T`, `Circuit` and `CircuitBuilder`;
+`quantum_circuits.circuit` and `quantum_circuits.stream` have their own
 exports. Shared definitions, rotation synthesis and arithmetic
 constructors are planned.
 

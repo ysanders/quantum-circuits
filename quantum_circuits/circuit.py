@@ -14,29 +14,63 @@ from __future__ import annotations
 import heapq
 from dataclasses import dataclass
 
+from .clifford import Clif
 from .operators import I, WireOp
 from .stream import (
-    CLASSICAL, QUANTUM, CZGate, End, Measure, Port, Prepare, Record, Start,
-    assign_digests,
+    CLASSICAL, QUANTUM, CliffordGate, CZGate, End, Measure, Port, Prepare,
+    Record, Start, TGate, assign_digests,
 )
-from .wire import lower_operator
 
-__all__ = ['Circuit', 'CircuitBuilder']
+__all__ = ['Circuit', 'CircuitBuilder', 'lower_operator']
+
+
+def _append_clifford(records: list[Record], word: str, qubit: str) -> None:
+    """Append the CLIF record for an H/S word, or nothing for an identity frame."""
+    frame = Clif.from_word(word).frame
+    if frame:
+        records.append(CliffordGate(frame, qubit))
+
+
+def lower_operator(operator: WireOp, qubit: str) -> tuple[Record, ...]:
+    """Stream records for an operator on one qubit, up to global phase.
+
+    CLIF and T records alternate, with at most one CLIF between consecutive
+    T gates and no CLIF for an identity frame. The records contain exactly
+    operator.t_count T gates. Operators that differ only in phase give
+    equal records.
+    """
+    if not isinstance(operator, WireOp):
+        raise TypeError('operator must be a WireOp')
+    Port(QUANTUM, qubit)  # rejects a qubit name the stream cannot write
+    records: list[Record] = []
+    # iter_gates gives an exact H/S/T word in execution order. Each run of H
+    # and S between T gates is one Clifford; its frame drops the phase.
+    clifford_word = ''
+    for gate in operator.iter_gates():
+        if gate == 'T':
+            _append_clifford(records, clifford_word, qubit)
+            records.append(TGate(qubit))
+            clifford_word = ''
+        else:
+            clifford_word += gate
+    _append_clifford(records, clifford_word, qubit)
+    return tuple(records)
 
 
 Pair = tuple[int, int]
 
 
 def _canonical_order(wire_count: int, vertices: tuple[Pair, ...]) -> tuple[Pair, ...]:
-    """Reorder CZ vertices into the canonical time order.
+    """Put CZ vertices, given in any valid time order, into the stored order.
 
-    vertices may be any time order. A vertex is ready when it is the next
-    unprocessed event on both of its wires. The canonical order repeatedly
-    takes the ready vertex with the smallest wire pair. Two ready vertices
-    never share a pair, because the later one waits on both wires.
-
-    The result depends only on each wire's sequence of partner wires, not
-    on the order of the input, so equal structures get equal orders.
+    CZs on disjoint wires can be applied in either order with the same
+    result, so the stored order must not depend on the order given. The
+    stored order is built one vertex at a time. At each step, the vertices
+    that may come next are those with no unstored vertex before them on
+    either of their wires. Of these, take the one with the smallest wire
+    pair, comparing first wires and then second wires. Two vertices that
+    may come next never share a pair, because the later one waits on both
+    wires.
     """
     events: list[list[int]] = [[] for _ in range(wire_count)]  # vertex indices
     for index, (first, second) in enumerate(vertices):
@@ -44,28 +78,30 @@ def _canonical_order(wire_count: int, vertices: tuple[Pair, ...]) -> tuple[Pair,
         events[second].append(index)
     next_event = [0] * wire_count
 
-    def is_ready(index: int) -> bool:
+    def can_come_next(index: int) -> bool:
         return all(
             next_event[wire] < len(events[wire])
             and events[wire][next_event[wire]] == index
             for wire in vertices[index]
         )
 
-    ready = [(pair, index) for index, pair in enumerate(vertices) if is_ready(index)]
-    heapq.heapify(ready)
-    queued = {index for _, index in ready}
+    # A heap of (pair, index), so the smallest pair is popped first.
+    candidates = [
+        (pair, index) for index, pair in enumerate(vertices) if can_come_next(index)]
+    heapq.heapify(candidates)
+    queued = {index for _, index in candidates}
     order = []
-    while ready:
-        pair, index = heapq.heappop(ready)
+    while candidates:
+        pair, index = heapq.heappop(candidates)
         order.append(pair)
         for wire in pair:
             next_event[wire] += 1
-        # Only the next events on this vertex's two wires can have become ready.
+        # Storing a vertex can only free the next vertex on each of its wires.
         for wire in pair:
             if next_event[wire] < len(events[wire]):
                 candidate = events[wire][next_event[wire]]
-                if candidate not in queued and is_ready(candidate):
-                    heapq.heappush(ready, (vertices[candidate], candidate))
+                if candidate not in queued and can_come_next(candidate):
+                    heapq.heappush(candidates, (vertices[candidate], candidate))
                     queued.add(candidate)
     return tuple(order)
 

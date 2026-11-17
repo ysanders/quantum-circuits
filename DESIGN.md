@@ -98,13 +98,19 @@ has an input and output port for each wire. Connections identify these
 ports explicitly. A one-wire unitary circuit can be a labelled edge alone.
 
 `Circuit` stores each wire's segments in order and each CZ as the pair of
-wires it joins. Storage order should carry no meaning, so the vertices
-are kept in a canonical time order. A vertex is ready when it is the next
-event on both of its wires; the order repeatedly takes the ready vertex
-with the smallest wire pair. Constructions that differ only in the order
-of commuting CZs therefore give equal circuits and equal streams. The
-stream follows the same order: for each vertex, the segments that end
-there, then the CZ; the final segments and measurements come last.
+wires it joins. CZs on disjoint wires can be applied in either order with
+the same result, so the stored order of CZs must not depend on the order
+of construction. `Circuit` fixes the order one CZ at a time. At each step,
+the CZs that may come next are those with no unstored CZ before them on
+either of their wires. Of these, it stores the one with the smallest wire
+pair, comparing first wires and then second wires.
+
+For example, CZ(2, 3) followed by CZ(0, 1) is stored as (0, 1), (2, 3). But
+CZ(1, 2) followed by CZ(0, 1) keeps its order, because on wire 1 the CZ
+(0, 1) comes after (1, 2). Two constructions of the same circuit therefore
+give equal stored forms and equal streams. The stream follows the stored
+order: for each CZ, the segments that end there, then the CZ; the final
+segments and measurements come last.
 
 ### Preparation and measurement
 
@@ -116,8 +122,7 @@ measurement.
 
 Construction records a symbolic result and its dependencies without
 sampling an outcome. Preparation and measurement are separate from the
-unitary `WireOp` algebra. `Wire` implements the one-wire case: an input
-port or a preparation, a `WireOp`, then an output port or a measurement.
+unitary `WireOp` algebra.
 
 ### Boundaries and validity
 
@@ -369,11 +374,12 @@ See [Nguyen et al., Section V](https://arxiv.org/abs/2509.13546) for the
 pipeline, [Saadatmand et al.](https://arxiv.org/abs/2406.06015) for the
 machine, and [Moflic et al.](https://arxiv.org/abs/2507.20677) for Pandora.
 
-The snapshot suggests four considerations for an adapter:
+An adapter from the stream to Rottnest would meet four differences:
 
 - **Vocabulary:** Cabaliser accepts basic Cliffords, CNOT, CZ, tagged Z
   rotations and measurement on numbered qubits. Its additional output
-  Clifford labels are not accepted as input.
+  Clifford labels are not accepted as input. It has no preparation
+  instruction; every qubit enters a widget as an input.
 - **Rotations:** each tagged rotation adds a graph qubit and is synthesised
   later. Expanding it into T gates beforehand changes this representation.
   Angles are in units of pi; precision is run-wide despite the presence of
@@ -382,9 +388,11 @@ The snapshot suggests four considerations for an adapter:
   finished frame's cost to the current one. The composer does no qubit
   remapping. Markers also end widgets, so call boundaries can affect
   estimates.
-- **Semantics:** the parser does not preserve general classical control,
-  and the pipeline decomposes CCZ into T gates. Supported measurement and
-  control contracts would need to be established.
+- **Semantics:** the parser strips classical control and applies the gate
+  unconditionally, and the pipeline decomposes CCZ into T gates.
+  Cabaliser conditions only a Pauli, on a qubit measured in the same
+  instruction. The stream's other conditioned gates and its classical
+  operations have no counterpart.
 
 Sources: [Cabaliser](https://github.com/QSI-BAQS/cabaliser) (`9bc6ed1`),
 [rottnest_py](https://github.com/QSI-BAQS/rottnest_py) (`0109b89`),

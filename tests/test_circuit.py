@@ -6,11 +6,9 @@ builder's rules, the canonical vertex order, boundaries and streams.
 
 import unittest
 
-from quantum_circuits import (
-    MEASURE, PREPARE, Circuit, CircuitBuilder, H, I, T, op,
-)
+from quantum_circuits import Circuit, CircuitBuilder, H, I, T, op
 from quantum_circuits.stream import (
-    CLASSICAL, QUANTUM, CliffordGate, CZGate, Measure, Port, Prepare,
+    CLASSICAL, QUANTUM, CliffordGate, CZGate, Measure, Port, Prepare, TGate,
     check_stream, expand,
 )
 
@@ -91,12 +89,12 @@ class CanonicalOrderTests(unittest.TestCase):
         self.assertEqual(check_stream(first.to_stream()).root.digest,
                          check_stream(second.to_stream()).root.digest)
 
-    def test_ready_vertex_with_smallest_pair_comes_first(self) -> None:
+    def test_smallest_pair_that_may_come_next_is_stored_first(self) -> None:
         builder = CircuitBuilder(4)
         builder.cz(2, 3)
         builder.cz(0, 1)
         builder.cz(1, 2)
-        # (2, 3) and (0, 1) are ready at the start; (1, 2) waits for both.
+        # (2, 3) and (0, 1) may come first; (1, 2) waits for both.
         self.assertEqual(builder.build().vertices, ((0, 1), (2, 3), (1, 2)))
 
     def test_order_follows_each_wire(self) -> None:
@@ -136,15 +134,26 @@ class StreamTests(unittest.TestCase):
         ))
         self.assertEqual(flat.outputs, (Port(QUANTUM, '0'), Port(CLASSICAL, '1')))
 
-    def test_one_wire_circuit_matches_wire(self) -> None:
+    def test_prepared_measured_wire(self) -> None:
         builder = CircuitBuilder(0)
         wire = builder.prepare()
         builder.apply(op('HT'), wire)
         builder.measure(wire)
-        circuit_digest = check_stream(builder.build().to_stream()).root.digest
-        one_wire = PREPARE.then(op('HT')).then(MEASURE)
-        wire_digest = check_stream(one_wire.to_stream()).root.digest
-        self.assertEqual(circuit_digest, wire_digest)
+        flat = expand(check_stream(builder.build().to_stream()))
+        self.assertEqual(flat.inputs, ())
+        self.assertEqual(flat.operations, (
+            Prepare('0'), CliffordGate(4, '0'), TGate('0'), Measure('0'),
+        ))
+        self.assertEqual(flat.outputs, (Port(CLASSICAL, '0'),))
+
+    def test_digest_ignores_names_and_phase(self) -> None:
+        def one_wire_digest(operator, name):
+            builder = CircuitBuilder(1)
+            builder.apply(operator, 0)
+            return check_stream(builder.build().to_stream((name,))).root.digest
+
+        self.assertEqual(one_wire_digest(T, 'a'), one_wire_digest(op(T, phase=3), 'b'))
+        self.assertNotEqual(one_wire_digest(T, 'a'), one_wire_digest(op('TH'), 'a'))
 
     def test_names(self) -> None:
         records = parity_check().to_stream(('data', 'ancilla'))
