@@ -7,9 +7,9 @@ Use it if you like it.
 ## What this is
 
 A Python library that serves as a lowering target for my quantum compiler.
-Circuits will be built from shared definitions, so that a consumer can walk
-one without expanding it and extract it to Qualtran, Cirq, Qiskit or
-another library. [DESIGN.md](DESIGN.md) explains the model and its uses, including
+Circuits will be built from shared definitions, so that a consumer can walk one
+without expanding it and extract it to Qualtran, Cirq, Qiskit or another
+library. [DESIGN.md](DESIGN.md) explains the model and its uses, including
 polynomial evaluation.
 
 Today the package provides the exact single-qubit Clifford+T algebra that
