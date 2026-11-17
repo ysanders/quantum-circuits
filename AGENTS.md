@@ -31,9 +31,9 @@ Only exact single-qubit Clifford+T algebra exists. The public exports are
 Circuit types, rotation synthesis and arithmetic constructors are planned.
 
 Next add single-qubit preparation and measurement, then wire intersections.
-Measurement destroys its wire; its classical output contract remains open.
-The old graph and arithmetic recipes in Git history are references, not
-requirements for the new model.
+Measurement destroys its wire. The stream proposal in DESIGN.md covers
+classical outcomes. The old graph and arithmetic recipes in Git history
+are references, not requirements for the new model.
 
 ## Working rules
 

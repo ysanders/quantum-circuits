@@ -25,7 +25,8 @@ Only exact single-qubit Clifford+T algebra is implemented today; see
 [README.md](README.md). The circuit model and constructors below are planned.
 
 [Arithmetic example](#arithmetic-example) · [Circuit representation](#circuit-representation) ·
-[Shared subcircuits](#shared-subcircuits) · [Equality and hashing](#equality-and-hashing) ·
+[Shared subcircuits](#shared-subcircuits) · [Stream (proposal)](#stream-proposal) ·
+[Equality and hashing](#equality-and-hashing) ·
 [Example: CCZ](#example-ccz) · [External tools](#external-tools) ·
 [Implementation order](#implementation-order)
 
@@ -65,7 +66,8 @@ A circuit means a time-ordered sequence of primitive operations on
 addressed qubits. The primitives are single-qubit Clifford gates, T, CZ on
 two distinct qubits, and single-qubit preparation and measurement in the
 computational basis. Physical placement, routing and scheduling belong to
-external consumers.
+external consumers. The [stream proposal](#stream-proposal) makes this
+sequence precise.
 
 The library stores a circuit under a programming discipline: wires that
 intersect pairwise. The discipline is a convenience; the sequence defines
@@ -142,6 +144,110 @@ Tools can inspect, translate or summarise each definition once. Gate
 counting can multiply a child's count by its number of uses. Explicit
 expansion remains available when a task needs elementary operations.
 
+## Stream (proposal)
+
+The stream fixes what a circuit means. It writes a circuit as records in
+time order, one per line, in 7-bit ASCII. Emitting it to consumers is a
+secondary use. The record syntax below is illustrative.
+
+### Records
+
+Quantum operations:
+
+- `CLIF k q`: the single-qubit Clifford with frame `k`, up to phase. Frame
+  `k` denotes the matrix product `P[k % 4] R[k // 4]`, with
+  `P = (I, X, Y, Z)` and `R = (I, H, S, HS, SH, HSH)`, as in `Clif`.
+- `T q`.
+- `CZ a b`, with `a` and `b` distinct.
+- `PREP q`: prepare `|0>` under a new name `q`.
+- `MEAS q`: measure `q` in the computational basis. Afterwards `q` names
+  the classical outcome.
+
+`CLIF`, `T` and `CZ` take an optional condition `if c`, where `c` is a
+classical name. The gate acts only when `c` is 1.
+
+Classical operations write a new name: `XOR a b -> c`, `AND a b -> c` and
+`NOT a -> c`. `DISCARD c` ends a classical name. `REPORT c` ends it and
+returns its value; only the root reports.
+
+Definitions:
+
+- `START d (names)` opens definition `d` and binds its ordered input ports.
+- `END d (names)` closes it and binds its ordered output ports.
+- `REQUEST d (ins) (outs)` uses a definition that has already ended.
+
+The stream is one definition, the root. A definition's first use appears
+inline between `START` and `END`; later uses are `REQUEST` records.
+`START` and `END` nest and match by `d`. No `d` opens twice, and a
+`REQUEST` follows its definition's `END`, which excludes recursion. Name
+lists mark each name as quantum or classical.
+
+### Names
+
+- **Single assignment:** `PREP`, a classical operation, the root's `START`
+  list or a `REQUEST` output list introduces a name. No name is introduced
+  twice. `MEAS` turns a quantum name into a classical one.
+- **Uses:** an inline block and a `REQUEST` are both uses. A use's input
+  list is its `START` list or `ins`; its output list is its `END` list or
+  `outs`. A name in both lists continues, and the definition's `START` name
+  at that input position must be its `END` name at that output position. A
+  name only in the input list ends at the use. A name only in the output
+  list is new to the caller.
+- **Kinds:** a gate uses a quantum name only while it is quantum. A
+  classical name can be read any number of times, as a condition or an
+  input.
+- **Ending:** within each definition, each quantum name ends exactly once,
+  by `MEAS`, a use or the `END` list. Each classical name, including a
+  measured one, ends exactly once, by `DISCARD`, `REPORT`, a use or the
+  `END` list.
+- **Scope:** a definition's records use only its `START` names, the names
+  it introduces and the names its uses return.
+
+### Digests
+
+A definition's label `d` is its digest: `sha256:` followed by the SHA-256
+of the definition's records, with `d` omitted from its own `START` and
+`END`. Before hashing, `START` names become their
+positions 0, 1, 2 and so on; introduced names continue the count in order
+of introduction. Each nested `START ... END` block becomes the `REQUEST`
+record for that use.
+
+The digest depends on record order. Library normalisation makes equal
+constructions emit equal records. Equal digests then identify a definition
+across streams, as a standard library needs. For now a stream contains
+every definition it uses; linking against a library can come later.
+
+### Meaning
+
+Replacing each `REQUEST` by its definition's body, with ports rebound and
+internal names made fresh, gives a flat straight-line program. That program
+is the circuit. A condition decides whether a gate acts, never which record
+comes next. The stream carries no global phase; the library keeps phase for
+upstream use.
+
+This library will provide a checker for these rules and an expander for
+this meaning.
+
+### Example
+
+Measurement-based uncomputation of AND, used twice. The inputs `t` and `u`
+hold `a AND b` and `b AND c`. Angle brackets stand for digests.
+
+```text
+START <root> (q:a q:b q:c q:t q:u)
+START <undo> (q:a q:b q:t)
+CLIF 4 t
+MEAS t
+CZ a b if t
+DISCARD t
+END <undo> (q:a q:b)
+REQUEST <undo> (q:b q:c q:u) (q:b q:c)
+END <root> (q:a q:b q:c)
+```
+
+`CLIF 4` is H. The `REQUEST` binds ports 0, 1 and 2 to `b`, `c` and `u`.
+To compute `<undo>`, the hasher renames `a`, `b` and `t` to 0, 1 and 2.
+
 ## Equality and hashing
 
 Identical definitions should have identical digests. Equivalent definitions
@@ -155,9 +261,9 @@ body and digest when they differ only by a permutation of qubit indices.
 Canonicalisation must retain the boundary permutations needed to reconnect
 each occurrence correctly. It need not delay circuit construction.
 
-A digest will cover boundaries, operations, connections and child digests,
-forming a Merkle DAG. Specify its encoding and recognised equivalences
-when implementing it. Python's `hash()` is not a persistent identifier,
+The [stream proposal](#stream-proposal) gives a digest's encoding. Child
+digests enter a parent's, forming a Merkle DAG. Python's `hash()` is not a
+persistent identifier,
 and a topological traversal does not provide canonical graph labelling.
 
 Different bodies can implement the same operation: moving T through CZ is
@@ -216,11 +322,13 @@ scheduling, error correction and magic-state supply, not just gate counts.
 Rottnest coordinates such a compilation and estimation pipeline. Qualtran
 represents algorithms as composable blocks, called bloqs, and supports
 [resource counting over their call graph](https://qualtran.readthedocs.io/en/latest/resource_counting/call_graph.html).
-Both are possible consumers; their adapters are their authors' responsibility.
+Both are possible consumers. Their teams decide whether and how to read
+the stream.
 
 ### Rottnest research
 
-These notes summarise public code and papers examined on 16 November 2026.
+These notes summarise public code and papers examined on 16 and 17 November
+2026.
 No backend code or adapter was run.
 
 | Tool | Role in the recorded pipeline |
@@ -250,9 +358,10 @@ The snapshot suggests four considerations for an adapter:
   later. Expanding it into T gates beforehand changes this representation.
   Angles are in units of pi; precision is run-wide despite the presence of
   per-rotation tolerance fields.
-- **Reuse:** START/END markers cache a subcircuit result; REQUEST reuses it
-  with another wire binding. Markers also end widgets, so call boundaries
-  can affect estimates.
+- **Reuse:** START/END markers open and close a cost frame; REQUEST adds a
+  finished frame's cost to the current one. The composer does no qubit
+  remapping. Markers also end widgets, so call boundaries can affect
+  estimates.
 - **Semantics:** the parser does not preserve general classical control,
   and the pipeline decomposes CCZ into T gates. Supported measurement and
   control contracts would need to be established.
@@ -265,13 +374,13 @@ Sources: [Cabaliser](https://github.com/QSI-BAQS/cabaliser) (`9bc6ed1`),
 
 ### Library boundary
 
-Consumers should be able to inspect a definition's ordered ports,
-operations, measurement dependencies and child bindings without expanding
-every occurrence. Adapters choose serialization, decomposition and call
-boundaries, and match port, angle, phase and measurement conventions.
+Consumers read the stream or inspect definitions directly: ordered ports,
+operations, measurement dependencies and child bindings, without expanding
+every occurrence. An adapter translates either into its consumer's format,
+decomposition and call boundaries.
 
-Exact traversal retains unitary phase; any consumer-specific omission
-belongs in its adapter. The library's semantics remain independent of
+The library keeps exact phase; the stream omits it. Any further omission
+belongs in an adapter. The library's semantics remain independent of
 consumer limitations. No adapter is implemented yet.
 
 ## Implementation order
