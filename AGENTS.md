@@ -26,13 +26,15 @@ determine this library's mathematical model.
 
 ## Current state and next work
 
-Exact single-qubit Clifford+T algebra, one-wire circuits and the stream
-module exist. The package exports `Clif`, `WireOp`, `op`, `I`, `X`, `Y`,
-`Z`, `H`, `S`, `T`, `Wire`, `PREPARE` and `MEASURE`; `quantum_circuits.wire`
-and `quantum_circuits.stream` have their own exports. Intersecting wires,
-rotation synthesis and arithmetic constructors are planned.
+Exact single-qubit Clifford+T algebra, one-wire circuits, circuits of
+wires that intersect at CZ, and the stream module exist. The package
+exports `Clif`, `WireOp`, `op`, `I`, `X`, `Y`, `Z`, `H`, `S`, `T`, `Wire`,
+`PREPARE`, `MEASURE`, `Circuit` and `CircuitBuilder`;
+`quantum_circuits.wire` and `quantum_circuits.stream` have their own
+exports. Shared definitions, rotation synthesis and arithmetic
+constructors are planned.
 
-Next add wire intersections, starting with CZ.
+Next add shared definitions and bindings.
 Measurement destroys its wire. DESIGN.md's stream section covers classical
 outcomes. The old graph and arithmetic recipes in Git history are
 references, not requirements for the new model.

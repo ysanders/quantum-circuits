@@ -17,15 +17,16 @@ will label wire segments: composition, inverses, integer powers and H/S/T
 output with the minimum T count. Operators have unique stored forms,
 including phase, for exact equality and hashing.
 
-A `Wire` is a one-wire circuit. It can start by preparing `|0>` and end
-with a measurement in the computational basis.
+A `Circuit` holds wires that meet at CZ vertices, and a `Wire` is the
+one-wire case. A wire can start by preparing `|0>` and end with a
+measurement in the computational basis.
 
 It also provides `quantum_circuits.stream`, which parses, checks and expands
 the stream: the text format that fixes what a circuit means.
 
-Wires cannot intersect yet, and there is no rotation synthesiser or
-arithmetic API. The
-older circuit prototype remains in Git history.
+Circuits cannot share subcircuit definitions yet, and there is no rotation
+synthesiser or arithmetic API. The older circuit prototype remains in Git
+history.
 
 The package and its tests use only the Python standard library.
 
@@ -34,8 +35,9 @@ The package and its tests use only the Python standard library.
 
 ## Current API
 
-The package exports `Clif`, `WireOp`, `op`, `Wire`, the gate constants
-`I`, `X`, `Y`, `Z`, `H`, `S` and `T`, and the wires `PREPARE` and `MEASURE`.
+The package exports `Clif`, `WireOp`, `op`, `Wire`, `Circuit`,
+`CircuitBuilder`, the gate constants `I`, `X`, `Y`, `Z`, `H`, `S` and `T`,
+and the wires `PREPARE` and `MEASURE`.
 
 ### Exact operators on one qubit
 
@@ -157,6 +159,48 @@ lines = format_stream(wire.to_stream()).splitlines()
 assert lines[1:5] == ["PREP q", "CLIF 4 q", "T q", "MEAS q"]
 ```
 
+### Circuits
+
+A `Circuit` holds wires that meet at CZ vertices. `CircuitBuilder(n)`
+starts `n` wires at input ports and appends operations in execution order:
+
+- `prepare()` adds a wire that starts by preparing `|0>`, and returns its
+  index.
+- `apply(u, w)` applies the `WireOp` `u` to wire `w`.
+- `cz(a, b)` applies CZ to two distinct wires.
+- `measure(w)` ends wire `w` with a measurement in the computational basis.
+  The wire takes no further operations.
+- `build()` freezes the operations so far into a `Circuit`.
+
+A circuit stores `segments[w]`, the operators on wire `w` before, between
+and after its vertices, and `vertices`, the CZ wire pairs `(a, b)` with
+`a < b`. `prepared` and `measured` are frozensets of wire indices. Input
+port `i` belongs to the `i`-th wire in `input_wires`. Every wire ends at an
+output port, in wire order, which is classical if the wire was measured.
+`inputs` and `outputs` give the port kinds.
+
+`vertices` are in a canonical time order, so circuits that differ only in
+the order of commuting CZs are equal. `to_stream(names=None)` gives the
+circuit as a checked stream, with wires named `q0`, `q1` and so on unless
+`names` is given.
+
+```python
+from quantum_circuits import CircuitBuilder, H
+from quantum_circuits.stream import format_stream
+
+builder = CircuitBuilder(1)
+ancilla = builder.prepare()
+builder.apply(H, ancilla)
+builder.cz(0, ancilla)
+builder.apply(H, ancilla)
+builder.measure(ancilla)
+circuit = builder.build()
+assert circuit.outputs == ("q", "c")
+lines = format_stream(circuit.to_stream()).splitlines()
+expected = ["PREP q1", "CLIF 4 q1", "CZ q0 q1", "CLIF 4 q1", "MEAS q1"]
+assert lines[1:6] == expected
+```
+
 ### The stream
 
 `quantum_circuits.stream` reads, checks and expands the text format in
@@ -226,8 +270,11 @@ python3 -m pip install -e .
   minimal T counts against an exact matrix lower bound up to six T gates.
 - Words, phases, inverses, powers, H/S/T output, input validation, hashing
   and reduction of a long word without recursion.
-- The CCZ body in DESIGN.md against its exact definition, in
-  `tests/test_ccz.py`.
+- The CCZ body in DESIGN.md, built with `CircuitBuilder`, against its exact
+  definition: the stored circuit with phase, and its stream up to global
+  phase, in `tests/test_ccz.py`.
+- Circuits in `tests/test_circuit.py`: the builder's rules, the canonical
+  vertex order, boundaries and streams.
 - Wires in `tests/test_wire.py`: composition, and the lowering of every
   operator with at most three T gates, checked against independent exact
   matrices up to phase.
@@ -262,10 +309,12 @@ search.
 | `quantum_circuits/operators.py` | Exact Clifford+T values, their reduction, and their output as gates |
 | `quantum_circuits/_clifford_tables.py` | The generated finite tables |
 | `quantum_circuits/wire.py` | One-wire circuits and the lowering of operators to stream records |
+| `quantum_circuits/circuit.py` | Circuits of intersecting wires, their builder and their streams |
 | `quantum_circuits/stream.py` | Stream records, text, checker, digests and expansion |
 | `tools/generate_clifford_tables.py` | The exact, reproducible table generator |
 | `tests/test_clifford.py`, `tests/test_operators.py` | Tests of the algebra and the public interface |
-| `tests/test_ccz.py` | The CCZ body as data, checked exactly |
+| `tests/test_ccz.py` | The CCZ body, built and checked exactly |
+| `tests/test_circuit.py` | Tests of the builder, vertex order, boundaries and streams |
 | `tests/test_wire.py` | Tests of wires and their lowering |
 | `tests/test_stream.py` | Tests of the stream format, rules and expansion |
 | `tests/exact_reference.py`, `tests/reference.py` | The exact and the numerical reference matrices |

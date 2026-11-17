@@ -21,10 +21,10 @@ The scope has three parts:
   polynomial evaluations on quantum registers. Python builds the circuit;
   the quantum computer performs the arithmetic.
 
-Exact single-qubit Clifford+T algebra, one-wire circuits with preparation
-and measurement, and the stream are implemented today; see
-[README.md](README.md). The rest of the circuit model and the constructors
-below are planned.
+Exact single-qubit Clifford+T algebra, circuits of wires that intersect at
+CZ, with preparation and measurement, and the stream are implemented today;
+see [README.md](README.md). Shared definitions and the constructors below
+are planned.
 
 [Arithmetic example](#arithmetic-example) · [Circuit representation](#circuit-representation) ·
 [Shared subcircuits](#shared-subcircuits) · [Stream](#stream) ·
@@ -96,6 +96,15 @@ its chosen body, as the CCZ example below shows.
 Intersections are vertices; stretches of wire are labelled edges. Each CZ
 has an input and output port for each wire. Connections identify these
 ports explicitly. A one-wire unitary circuit can be a labelled edge alone.
+
+`Circuit` stores each wire's segments in order and each CZ as the pair of
+wires it joins. Storage order should carry no meaning, so the vertices
+are kept in a canonical time order. A vertex is ready when it is the next
+event on both of its wires; the order repeatedly takes the ready vertex
+with the smallest wire pair. Constructions that differ only in the order
+of commuting CZs therefore give equal circuits and equal streams. The
+stream follows the same order: for each vertex, the segments that end
+there, then the CZ; the final segments and measurements come last.
 
 ### Preparation and measurement
 
@@ -304,8 +313,9 @@ c:   H    H T^-1 H    H T H    H T^-1 H    H T
 ```
 
 Seven edges carry one T or T^-1 each. [tests/test_ccz.py](tests/test_ccz.py)
-checks this body against CCZ on all eight basis states, exactly and with
-phase included.
+builds this body with `CircuitBuilder` and checks it against CCZ on all
+eight basis states, exactly and with phase included. It also checks the
+body's stream, up to global phase.
 
 ### Why this body is CCZ
 
@@ -395,11 +405,8 @@ consumer limitations. No adapter is implemented yet.
 
 ## Implementation order
 
-Preparation and measurement exist for one wire. Next introduce
-intersections through explicit ports, starting with CZ. Represent the CCZ
-body above and reuse its independent exact check.
-
-Shared definitions and bindings build on this structure. Rotation synthesis
-and coherent arithmetic constructors supply the higher-level operations.
-General equivalence machinery, permutation canonicalisation and adapters
-can follow as needed.
+Wires intersect at CZ, and the CCZ body above is built and checked
+exactly. Next come shared definitions and bindings, built on this
+structure. Rotation synthesis and coherent arithmetic constructors supply
+the higher-level operations. General equivalence machinery, permutation
+canonicalisation and adapters can follow as needed.
