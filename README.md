@@ -6,7 +6,6 @@ Use it if you like it.
 
 ## What this is
 
-A Python library that serves as a lowering target for my quantum compiler.
 A circuit will be able to use other circuits as subcircuits. Each subcircuit
 is stored once, however often it is used, so a consumer can walk a circuit
 without expanding it and extract it to Qualtran, Cirq, Qiskit or another
@@ -34,7 +33,7 @@ The package and its tests use only the Python standard library.
 
 ## Current API
 
-The package exports `Clif`, `WireOp`, `op`, `Circuit`, `CircuitBuilder`
+The package exports `Clif`, `WireOp`, `op`, `Circuit`
 and the gate constants `I`, `X`, `Y`, `Z`, `H`, `S` and `T`.
 
 ### Exact operators on one qubit
@@ -126,16 +125,7 @@ value.
 
 ### Circuits
 
-A `Circuit` holds wires that meet at CZ vertices. `CircuitBuilder(n)`
-starts `n` wires at input ports and appends operations in execution order:
-
-- `prepare()` adds a wire that starts by preparing `|0>`, and returns its
-  index.
-- `apply(u, w)` applies the `WireOp` `u` to wire `w`.
-- `cz(a, b)` applies CZ to two distinct wires.
-- `measure(w)` ends wire `w` with a measurement in the computational basis.
-  The wire takes no further operations.
-- `build()` freezes the operations so far into a `Circuit`.
+A `Circuit` holds wires that meet at CZ vertices.
 
 A circuit stores `segments[w]`, the operators on wire `w` before, between
 and after its vertices, and `vertices`, the CZ wire pairs `(a, b)` with
@@ -145,8 +135,7 @@ output port, in wire order, which is classical if the wire was measured.
 `inputs` and `outputs` give the port kinds.
 
 `vertices` are stored in a fixed time order, described in
-[DESIGN.md](DESIGN.md#segments-and-cz-vertices), so circuits
-that differ only in the order of commuting CZs are equal.
+[DESIGN.md](DESIGN.md#segments-and-cz-vertices).
 `to_stream(names=None)` gives the circuit as a checked stream, with wires
 named `q0`, `q1` and so on unless `names` is given. The stream retains exact
 phase. A nontrivial scalar is collected in one `PHASE k` record before END,
@@ -157,23 +146,6 @@ records for one operator, including phase. CLIF and T records alternate,
 with at most one CLIF between T gates and exactly `u.t_count` T gates.
 A final PHASE record carries any scalar contributed by the decomposition.
 It includes the phases of the Clifford runs, not just `u.phase`.
-
-```python
-from quantum_circuits import CircuitBuilder, H
-from quantum_circuits.stream import format_stream
-
-builder = CircuitBuilder(1)
-ancilla = builder.prepare()
-builder.apply(H, ancilla)
-builder.cz(0, ancilla)
-builder.apply(H, ancilla)
-builder.measure(ancilla)
-circuit = builder.build()
-assert circuit.outputs == ("q", "c")
-lines = format_stream(circuit.to_stream()).splitlines()
-expected = ["PREP q1", "CLIF 4 q1", "CZ q0 q1", "CLIF 4 q1", "MEAS q1"]
-assert lines[1:6] == expected
-```
 
 ### The stream
 
@@ -249,11 +221,8 @@ python3 -m pip install -e .
   minimal T counts against an exact matrix lower bound up to six T gates.
 - Words, phases, inverses, powers, H/S/T output, input validation, hashing
   and reduction of a long word without recursion.
-- The CCZ body in DESIGN.md, built with `CircuitBuilder`, against its exact
-  definition: both the stored circuit and its stream, including phase,
-  in `tests/test_ccz.py`.
-- Circuits in `tests/test_circuit.py`: the builder's rules, the stored CZ
-  order, boundaries and streams.
+- Circuits in `tests/test_circuit.py`: the stored CZ
+  order.
 - The lowering of every operator with at most three T gates, against
   independent exact matrices including phase, in `tests/test_lowering.py`.
 - The stream in `tests/test_stream.py`: text round trips, a digest computed
@@ -287,12 +256,11 @@ search.
 | `quantum_circuits/clifford.py` | Exact Clifford values and their products |
 | `quantum_circuits/operators.py` | Exact Clifford+T values, their reduction, and their output as gates |
 | `quantum_circuits/_clifford_tables.py` | The generated finite tables |
-| `quantum_circuits/circuit.py` | Circuits of intersecting wires, their builder, and their lowering to the stream |
+| `quantum_circuits/circuit.py` | Circuits of intersecting wires and their lowering to the stream |
 | `quantum_circuits/stream.py` | Stream records, text, checker, digests and expansion |
 | `tools/generate_clifford_tables.py` | The exact, reproducible table generator |
 | `tests/test_clifford.py`, `tests/test_operators.py` | Tests of the algebra and the public interface |
-| `tests/test_ccz.py` | The CCZ body, built and checked exactly |
-| `tests/test_circuit.py` | Tests of the builder, stored CZ order, boundaries and streams |
+| `tests/test_circuit.py` | Tests of stored CZ order |
 | `tests/test_lowering.py` | Tests of lowering operators to stream records |
 | `tests/test_stream.py` | Tests of the stream format, rules and expansion |
 | `tests/exact_reference.py`, `tests/reference.py` | The exact and the numerical reference matrices |

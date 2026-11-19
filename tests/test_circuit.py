@@ -1,109 +1,11 @@
-"""Tests for circuits whose wires meet at CZ vertices.
-
-tests/test_ccz.py checks a full body exactly; these tests check the
-builder's rules, the stored CZ order, boundaries and streams.
-"""
+"""Tests for circuits whose wires meet at CZ vertices."""
 
 import unittest
 
-from quantum_circuits import Circuit, CircuitBuilder, H, I, T, op
-from quantum_circuits.stream import (
-    CLASSICAL, QUANTUM, CliffordGate, CZGate, Measure, Phase, Port, Prepare, TGate,
-    check_stream, expand,
-)
-
-
-def parity_check() -> Circuit:
-    """Measure the Z value of wire 0 onto a prepared wire, using H CZ H."""
-    builder = CircuitBuilder(1)
-    ancilla = builder.prepare()
-    builder.apply(H, ancilla)
-    builder.cz(0, ancilla)
-    builder.apply(H, ancilla)
-    builder.measure(ancilla)
-    return builder.build()
-
-
-def disjoint_pairs(first_pair: tuple, second_pair: tuple) -> Circuit:
-    builder = CircuitBuilder(4)
-    builder.cz(*first_pair)
-    builder.cz(*second_pair)
-    return builder.build()
-
-
-class BuilderTests(unittest.TestCase):
-    def test_prepared_and_measured_wires(self) -> None:
-        circuit = parity_check()
-        self.assertEqual(circuit.segments, ((I, I), (H, H)))
-        self.assertEqual(circuit.vertices, ((0, 1),))
-        self.assertEqual(circuit.prepared, frozenset({1}))
-        self.assertEqual(circuit.measured, frozenset({1}))
-        self.assertEqual(circuit.input_wires, (0,))
-        self.assertEqual(circuit.inputs, (QUANTUM,))
-        self.assertEqual(circuit.outputs, (QUANTUM, CLASSICAL))
-
-    def test_operators_accumulate_between_vertices(self) -> None:
-        builder = CircuitBuilder(2)
-        builder.apply(H, 0)
-        builder.apply(T, 0)
-        builder.cz(0, 1)
-        builder.apply(T, 1)
-        self.assertEqual(builder.build().segments, ((T @ H, I), (I, T)))
-
-    def test_cz_is_symmetric(self) -> None:
-        self.assertEqual(disjoint_pairs((1, 0), (3, 2)), disjoint_pairs((0, 1), (2, 3)))
-
-    def test_consecutive_equal_czs_are_kept(self) -> None:
-        builder = CircuitBuilder(2)
-        builder.cz(0, 1)
-        builder.cz(0, 1)
-        circuit = builder.build()
-        self.assertEqual(circuit.vertices, ((0, 1), (0, 1)))
-        self.assertEqual(circuit.segments, ((I, I, I), (I, I, I)))
-
-    def test_rejects_invalid_operations(self) -> None:
-        builder = CircuitBuilder(2)
-        builder.measure(1)
-        cases = {
-            'operator on a measured wire': lambda: builder.apply(H, 1),
-            'CZ with a measured wire': lambda: builder.cz(0, 1),
-            'measuring twice': lambda: builder.measure(1),
-            'CZ on one wire': lambda: builder.cz(0, 0),
-            'missing wire': lambda: builder.apply(H, 2),
-            'negative input count': lambda: CircuitBuilder(-1),
-            'boolean input count': lambda: CircuitBuilder(True),
-        }
-        for description, attempt in cases.items():
-            with self.subTest(description), self.assertRaises(ValueError):
-                attempt()
-        with self.assertRaises(TypeError):
-            builder.apply('H', 0)
+from quantum_circuits import Circuit, I
 
 
 class StoredOrderTests(unittest.TestCase):
-    def test_order_of_commuting_vertices_does_not_matter(self) -> None:
-        first = disjoint_pairs((0, 1), (2, 3))
-        second = disjoint_pairs((2, 3), (0, 1))
-        self.assertEqual(first, second)
-        self.assertEqual(first.vertices, ((0, 1), (2, 3)))
-        self.assertEqual(check_stream(first.to_stream()).root.digest,
-                         check_stream(second.to_stream()).root.digest)
-
-    def test_smallest_pair_that_may_come_next_is_stored_first(self) -> None:
-        builder = CircuitBuilder(4)
-        builder.cz(2, 3)
-        builder.cz(0, 1)
-        builder.cz(1, 2)
-        # (2, 3) and (0, 1) may come first; (1, 2) waits for both.
-        self.assertEqual(builder.build().vertices, ((0, 1), (2, 3), (1, 2)))
-
-    def test_order_follows_each_wire(self) -> None:
-        builder = CircuitBuilder(3)
-        builder.cz(1, 2)
-        builder.cz(0, 1)
-        # (0, 1) follows (1, 2) on wire 1, despite its smaller pair.
-        self.assertEqual(builder.build().vertices, ((1, 2), (0, 1)))
-
     def test_constructor_requires_stored_order(self) -> None:
         segments = ((I, I), (I, I), (I, I), (I, I))
         Circuit(segments, ((0, 1), (2, 3)))
@@ -122,65 +24,6 @@ class StoredOrderTests(unittest.TestCase):
                 attempt()
         with self.assertRaises(TypeError):
             Circuit(((I,),), (), {0})
-
-
-class StreamTests(unittest.TestCase):
-    def test_parity_check_stream(self) -> None:
-        flat = expand(check_stream(parity_check().to_stream()))
-        self.assertEqual(flat.inputs, (Port(QUANTUM, '0'),))
-        self.assertEqual(flat.operations, (
-            Prepare('1'), CliffordGate(4, '1'), CZGate('0', '1'),
-            CliffordGate(4, '1'), Measure('1'),
-        ))
-        self.assertEqual(flat.outputs, (Port(QUANTUM, '0'), Port(CLASSICAL, '1')))
-
-    def test_prepared_measured_wire(self) -> None:
-        builder = CircuitBuilder(0)
-        wire = builder.prepare()
-        builder.apply(op('HT'), wire)
-        builder.measure(wire)
-        flat = expand(check_stream(builder.build().to_stream()))
-        self.assertEqual(flat.inputs, ())
-        self.assertEqual(flat.operations, (
-            Prepare('0'), CliffordGate(4, '0'), TGate('0'), Measure('0'),
-        ))
-        self.assertEqual(flat.outputs, (Port(CLASSICAL, '0'),))
-
-    def test_digest_ignores_names_and_preserves_phase(self) -> None:
-        def one_wire_digest(operator, name):
-            builder = CircuitBuilder(1)
-            builder.apply(operator, 0)
-            return check_stream(builder.build().to_stream((name,))).root.digest
-
-        self.assertEqual(one_wire_digest(T, 'a'), one_wire_digest(T, 'b'))
-        self.assertNotEqual(one_wire_digest(T, 'a'), one_wire_digest(op(T, phase=3), 'b'))
-        self.assertNotEqual(one_wire_digest(I, 'a'), one_wire_digest(op(phase=4), 'a'))
-        self.assertNotEqual(one_wire_digest(T, 'a'), one_wire_digest(op('TH'), 'a'))
-
-    def test_stream_collects_phase_across_segments(self) -> None:
-        builder = CircuitBuilder(2)
-        builder.apply(op(phase=3), 0)
-        builder.cz(0, 1)
-        builder.apply(op(phase=6), 1)
-        flat = expand(check_stream(builder.build().to_stream()))
-        self.assertEqual(flat.operations, (CZGate('0', '1'), Phase(1)))
-
-        other = CircuitBuilder(2)
-        other.cz(0, 1)
-        other.apply(op(phase=1), 0)
-        self.assertEqual(builder.build().to_stream(), other.build().to_stream())
-
-        builder.apply(op(phase=7), 0)
-        flat = expand(check_stream(builder.build().to_stream()))
-        self.assertEqual(flat.operations, (CZGate('0', '1'),))
-
-    def test_names(self) -> None:
-        records = parity_check().to_stream(('data', 'ancilla'))
-        self.assertEqual(records[0].ports, (Port(QUANTUM, 'data'),))
-        with self.assertRaises(ValueError):
-            parity_check().to_stream(('only_one',))
-        with self.assertRaises(ValueError):
-            parity_check().to_stream(('same', 'same'))
 
 
 if __name__ == '__main__':

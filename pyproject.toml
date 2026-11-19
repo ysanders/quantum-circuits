@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "quantum-circuits"
 version = "0.1.0"
-description = "A lowering target for hierarchical quantum circuits"
+description = "quantum circuits"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = []

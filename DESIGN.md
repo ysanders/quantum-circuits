@@ -2,9 +2,7 @@
 
 ## Purpose and scope
 
-This library is a lowering target for the author's quantum compiler. Its
-job is to manage memory while a consumer iterates through a hierarchically
-constructed circuit. A circuit can use other circuits as subcircuits. Each
+A circuit can use other circuits as subcircuits. Each
 subcircuit is stored once, however often it is used, and each use binds its
 ports to the caller's wires. A consumer walks the circuit from the root and
 descends into any subcircuit it does not recognise. An extractor for
@@ -115,8 +113,7 @@ pair, comparing first wires and then second wires.
 
 For example, CZ(2, 3) followed by CZ(0, 1) is stored as (0, 1), (2, 3). But
 CZ(1, 2) followed by CZ(0, 1) keeps its order, because on wire 1 the CZ
-(0, 1) comes after (1, 2). Two constructions of the same circuit therefore
-give equal stored forms and equal streams. The stream follows the stored
+(0, 1) comes after (1, 2). The stream follows the stored
 order: for each CZ, the segments that end there, then the CZ; the final
 segments and measurements come last.
 
@@ -337,10 +334,7 @@ b:   I    I           T H      H T^-1 H    H
 c:   H    H T^-1 H    H T H    H T^-1 H    H T
 ```
 
-Seven segments carry one T or T^-1 each. [tests/test_ccz.py](tests/test_ccz.py)
-builds this body with `CircuitBuilder` and checks it against CCZ on all
-eight basis states, exactly and with phase included. It also checks the
-body's stream with the same exact phase.
+Seven segments carry one T or T^-1 each.
 
 ### Why this body is CCZ
 
@@ -432,8 +426,7 @@ independent of consumer limitations. No adapter is implemented yet.
 
 ## Implementation order
 
-Wires intersect at CZ, and the CCZ body above is built and checked
-exactly. The remaining work on circuits closes the gaps between what
+The remaining work on circuits closes the gaps between what
 `Circuit` can express and what the stream can:
 
 - **Subcircuits:** a circuit that uses other circuits, each use binding a

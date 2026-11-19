@@ -22,7 +22,7 @@ from .stream import (
     Record, Start, TGate, assign_digests,
 )
 
-__all__ = ['Circuit', 'CircuitBuilder', 'lower_operator']
+__all__ = ['Circuit', 'lower_operator']
 
 
 def _append_clifford(records: list[Record], word: str, qubit: str) -> int:
@@ -131,9 +131,6 @@ class Circuit:
     Wires in prepared start by preparing |0>; the others start at input
     ports, in wire order. Wires in measured end with a measurement; every
     wire ends at an output port, quantum or classical, in wire order.
-
-    Build circuits with CircuitBuilder, which puts vertices in stored order.
-    The constructor rejects any other order.
     """
 
     segments: tuple[tuple[WireOp, ...], ...]
@@ -171,7 +168,7 @@ class Circuit:
                     f'segments, not {len(self.segments[wire])}')
         if _stored_order(wire_count, self.vertices) != self.vertices:
             raise ValueError(
-                'vertices are not in stored order; build with CircuitBuilder')
+                'vertices are not in stored order')
         _check_wire_set(self.prepared, wire_count, 'prepared')
         _check_wire_set(self.measured, wire_count, 'measured')
 
@@ -249,71 +246,3 @@ class Circuit:
             records.append(Phase(phase % 8))
         records.append(End('root', output_ports))
         return assign_digests(records)
-
-
-class CircuitBuilder:
-    """Builds a Circuit from operations appended in execution order.
-
-    Wires 0 to input_count - 1 start at input ports. prepare adds a wire
-    that starts by preparing |0>. A measured wire takes no further
-    operations. build freezes the operations so far into a Circuit.
-    """
-
-    def __init__(self, input_count: int) -> None:
-        if type(input_count) is not int or input_count < 0:
-            raise ValueError('input_count must be a nonnegative integer')
-        # Invariant: finished[w] holds wire w's segments up to its last
-        # vertex, and pending[w] is the product of operators applied since.
-        self._finished: list[list[WireOp]] = [[] for _ in range(input_count)]
-        self._pending: list[WireOp] = [I] * input_count
-        self._vertices: list[tuple[int, int]] = []
-        self._prepared: set[int] = set()
-        self._measured: set[int] = set()
-
-    def _check_open(self, wire: object) -> None:
-        if type(wire) is not int or not 0 <= wire < len(self._pending):
-            raise ValueError(f'{wire!r} is not a wire of this circuit')
-        if wire in self._measured:
-            raise ValueError(f'wire {wire} has been measured')
-
-    def prepare(self) -> int:
-        """Add a wire that starts by preparing |0>, and return its index."""
-        self._finished.append([])
-        self._pending.append(I)
-        wire = len(self._pending) - 1
-        self._prepared.add(wire)
-        return wire
-
-    def apply(self, operator: WireOp, wire: int) -> None:
-        """Apply a single-qubit operator to a wire."""
-        if not isinstance(operator, WireOp):
-            raise TypeError('operator must be a WireOp')
-        self._check_open(wire)
-        # @ is the matrix product, so the new operator acts after the pending one.
-        self._pending[wire] = operator @ self._pending[wire]
-
-    def cz(self, first: int, second: int) -> None:
-        """Apply CZ to two distinct wires."""
-        self._check_open(first)
-        self._check_open(second)
-        if first == second:
-            raise ValueError('CZ needs two distinct wires')
-        for wire in (first, second):
-            self._finished[wire].append(self._pending[wire])
-            self._pending[wire] = I
-        self._vertices.append((min(first, second), max(first, second)))
-
-    def measure(self, wire: int) -> None:
-        """End a wire with a measurement in the computational basis."""
-        self._check_open(wire)
-        self._measured.add(wire)
-
-    def build(self) -> Circuit:
-        """Freeze the operations so far into a Circuit."""
-        segments = tuple(
-            tuple(finished) + (pending,)
-            for finished, pending in zip(self._finished, self._pending)
-        )
-        vertices = _stored_order(len(segments), tuple(self._vertices))
-        return Circuit(segments, vertices, frozenset(self._prepared),
-                       frozenset(self._measured))

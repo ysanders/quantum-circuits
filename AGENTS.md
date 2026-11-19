@@ -6,8 +6,7 @@ This file gives instructions for changing the repository.
 
 ## Purpose and scope
 
-Build a small Python library that serves as a lowering target for the
-author's quantum compiler. It must construct, inspect and manipulate
+Build a small Python library. It must construct, inspect and manipulate
 circuits.
 
 The intended scope is:
@@ -28,7 +27,7 @@ backend requirements do not determine this library's mathematical model.
 
 Exact single-qubit Clifford+T algebra, circuits of wires that intersect at
 CZ, and the stream module exist. The package exports `Clif`, `WireOp`,
-`op`, `I`, `X`, `Y`, `Z`, `H`, `S`, `T`, `Circuit` and `CircuitBuilder`;
+`op`, `I`, `X`, `Y`, `Z`, `H`, `S`, `T` and `Circuit`;
 `quantum_circuits.circuit` and `quantum_circuits.stream` have their own
 exports. Subcircuits, classical data, rotation synthesis and arithmetic
 constructors are planned. The circuit types abstract over the stream
@@ -109,5 +108,5 @@ Change the generator, run `python3 tools/generate_clifford_tables.py`,
 then verify with `--check`.
 
 Check decompositions with independent exact calculations, including phase
-and boundary order, as in `tests/test_ccz.py`. Bounded enumeration and
+and boundary order. Bounded enumeration and
 random tests provide regression evidence, not general proofs.
