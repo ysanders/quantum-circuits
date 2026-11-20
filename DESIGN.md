@@ -117,6 +117,61 @@ CZ(1, 2) followed by CZ(0, 1) keeps its order, because on wire 1 the CZ
 order: for each CZ, the segments that end there, then the CZ; the final
 segments and measurements come last.
 
+### Exact composition of one-wire circuits (proposed)
+
+Applying X then Z gives $iY$; reversing the order gives $-iY$. Both
+products act identically on the Pauli axes, but they are different
+matrices. The proposed design keeps the axis action in `Clifford` and the
+scalar on the circuit. The current API uses `Clif` and `WireOp`; the
+Python below illustrates the proposal.
+
+**`Clifford`: a signed action on the Pauli axes.** Conjugation by a
+Clifford permutes X, Y and Z and gives each image a sign. `image_signs`
+lists those signs in source order X, Y, Z; `z_axis` names the unsigned
+destination of Z. The sign of the permutation must equal the product of
+the three image signs. Given those signs and the destination of Z, only
+one ordering of the remaining axes works. The eight sign choices and three
+destinations encode all 24 actions. Composing two `Clifford` values
+composes their signed actions and returns another `Clifford`, with no
+scalar.
+
+**`Wire`: an exact one-wire circuit.** A wire applies the matrix
+representative of its initial Clifford, then a sequence of axis T gates
+in execution order. For example, `t_axes='xy'` applies the X-axis T before
+the Y-axis T. Each gate has eigenvalues 1 and $\omega=\exp(i\pi/4)$ on
+the positive and negative eigenstates of its Pauli axis, respectively.
+Adjacent axes must differ. This normal form minimises T-count for the
+isolated one-qubit operator
+([Giles and Selinger, Proposition 8.2](https://arxiv.org/pdf/1312.6584#page=12)).
+
+Converting a `Clifford` to a `Wire` uses the existing phase-zero matrix
+representative (`Clif(frame, phase=0)`), an empty T sequence and phase
+exponent zero. For X, Y and Z the representatives are the standard Pauli
+matrices.
+
+```python
+X = Clifford(image_signs='+--', z_axis='Z')
+Z = Clifford(image_signs='--+', z_axis='Z')
+x = Wire(initial=X, t_axes='')
+z = Wire(initial=Z, t_axes='')
+
+xz = then(x, z)  # Z @ X =  iY: initial Y, no T gates, phase 2
+zx = then(z, x)  # X @ Z = -iY: initial Y, no T gates, phase 6
+```
+
+`then(a, b)` returns a `Wire` that applies `a` first. If the two wire
+matrices are $\omega^j A$ and $\omega^k B$, then $A$ and $B$ include all
+their gates but omit their global scalars. `then` reduces $BA$ to
+$\omega^d R$, where $R$ is the phase-zero normal-form matrix. The result
+carries $R$ and exponent $j+k+d$ modulo eight.
+
+**`Circuit`: one scalar for the CZ network.** The proposal replaces the
+phases on individual segments with one circuit exponent. Inserting a
+standalone `Wire` as an unconditional segment adds its exponent to the
+enclosing `Circuit` and stores a phase-zero segment, leaving the original
+`Wire` unchanged. Under coherent control this scalar is a relative phase;
+it cannot move to the enclosing circuit as a global scalar.
+
 ### Preparation and measurement
 
 Preparation of `|0>` creates a wire. Z measurement destroys a wire and
